@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "ZDF Band Overwrite (Debug)",
+  "version": "0.1.0",
+  "description": "Ersetzt ein ZDF-Teaser-Band mit hart-codierten Debug-Items.",
+  "action": {
+    "default_icon": "icons/icon.svg",
+    "default_title": "ZDF Band Overwrite (Debug)"
+  },
+  "permissions": ["storage"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.zdf.de/*"],
+      "js": ["zdf_api.js", "main.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["reco_ids.json"],
+      "matches": ["https://www.zdf.de/*"]
+    }
+  ]
+}
