@@ -3,8 +3,19 @@
   "name": "ZDF Band Overwrite (Debug)",
   "version": "0.1.0",
   "description": "Ersetzt ein ZDF-Teaser-Band mit hart-codierten Debug-Items.",
+  "icons": {
+    "16": "icons/m1-16.png",
+    "32": "icons/m1-32.png",
+    "48": "icons/m1-48.png",
+    "128": "icons/m1-128.png"
+  },
   "action": {
-    "default_icon": "icons/icon.svg",
+    "default_icon": {
+      "16": "icons/m1-16.png",
+      "32": "icons/m1-32.png",
+      "48": "icons/m1-48.png",
+      "128": "icons/m1-128.png"
+    },
     "default_title": "ZDF Band Overwrite (Debug)",
     "default_popup": "popup.html"
   },

@@ -5,7 +5,8 @@
   "main": "src/main.js",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "watch": "node scripts/build.mjs --watch"
+    "watch": "node scripts/build.mjs --watch",
+    "package": "npm run build && cd dist && zip -1 -x \"*screens*\" -x \"*metadata*\" -x \"*/\\.*\" x \".*\" -x \"*.zip\" -r ../addon.zip ."
   },
   "keywords": [],
   "author": "",

@@ -9,6 +9,7 @@ export function renderAll() {
   renderPageTypes();
   renderJsonTemplates();
   renderQueryReference();
+  renderAbGroup();
 }
 
 // ---------- Start: Band-Konfigurationen ----------
@@ -352,6 +353,42 @@ function renderJsonTemplates() {
       state.removeJsonTemplate(t.id);
       renderJsonTemplates();
     });
+  });
+}
+
+// ---------- A/B-Gruppe überschreiben ----------
+
+function renderAbGroup() {
+  const el = document.getElementById("abGroupCard");
+  if (!el) return;
+
+  const groupList = state.abGroups.length === 0
+    ? `<p class="hint">Noch keine Gruppen geladen.</p>`
+    : `<ul class="hint" style="margin:0;padding-left:1.2rem;">${state.abGroups.map(g =>
+        `<li>${esc(g.name)}${g.probability != null ? ` (${g.probability}%)` : ""}</li>`).join("")}</ul>`;
+
+  el.innerHTML = `
+    <p class="hint">Verfügbare Gruppen — Setzen der Gruppe selbst passiert im Popup auf zdf.de, hier wird nur die Liste aktuell gehalten.</p>
+    ${groupList}
+    <div class="testRow">
+      <button type="button" class="btn small" id="reloadAbGroups">Gruppen neu laden</button>
+      <span class="testResult" id="abGroupReloadResult"></span>
+    </div>
+  `;
+
+  document.getElementById("reloadAbGroups").addEventListener("click", async () => {
+    const resultEl = document.getElementById("abGroupReloadResult");
+    resultEl.textContent = "Lädt …";
+    resultEl.classList.remove("error", "ok");
+    try {
+      await state.fetchAbGroups();
+      resultEl.textContent = "✓ Geladen";
+      resultEl.classList.add("ok");
+      renderAbGroup();
+    } catch (e) {
+      resultEl.textContent = `✕ ${e.message}`;
+      resultEl.classList.add("error");
+    }
   });
 }
 

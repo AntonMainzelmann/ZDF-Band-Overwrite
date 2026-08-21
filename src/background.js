@@ -4,16 +4,114 @@
 // Zielseite oder Fetches an fremde Hosts brauchen (CSP der Zielseite kann
 // Content-Script-Fetches blockieren, siehe fetchJson unten).
 
-function setBadge(isActive) {
-  chrome.action.setBadgeText({ text: isActive ? "ON" : "OFF" });
-  chrome.action.setBadgeBackgroundColor({ color: isActive ? "#FF6600" : "#777777" });
+const ICON_SIZES = ["16", "32", "48", "128"];
+function iconPaths(name) {
+  return Object.fromEntries(ICON_SIZES.map(sz => [sz, `icons/${name}-${sz}.png`]));
 }
 
-chrome.storage.local.get("isActive").then(({ isActive }) => setBadge(isActive !== false));
+function setBadge(isActive) {
+  chrome.action.setIcon({ path: iconPaths(isActive ? "m1_active" : "m1") })
+    .catch(e => console.error("[badge] setIcon fehlgeschlagen:", e));
+}
 
-// Badge folgt dem isActive-Zustand, unabhängig davon wer ihn ändert (Popup).
+// Badge ist "an" sobald mind. ein Band überschreibt — kein globaler Schalter
+// mehr, siehe popup.js.
+const NEXT_VIDEO_KEY = "__nextVideo__"; // muss zu main.js/popup.js passen
+
+// Bei mehreren schnell hintereinander getoggelten Einträgen laufen mehrere
+// updateBadge()-Aufrufe parallel; ihre storage.get()-Promises können außer
+// der Reihe auflösen. Token sorgt dafür, dass nur der zuletzt ausgelöste
+// Aufruf das Icon setzen darf, ein überholter Aufruf sonst einen älteren
+// Zustand über den aktuellen schreiben könnte.
+let badgeToken = 0;
+async function updateBadge() {
+  const token = ++badgeToken;
+  const { bandConfigs = [], bandActive = {}, nextVideoConfig } =
+    await chrome.storage.local.get(["bandConfigs", "bandActive", "nextVideoConfig"]);
+  if (token !== badgeToken) return;
+  const anyBandActive = bandConfigs.some(c => bandActive[c.label] !== false);
+  const nextVideoActive = !!nextVideoConfig?.endpoint && bandActive[NEXT_VIDEO_KEY] !== false;
+  setBadge(anyBandActive || nextVideoActive);
+}
+
+updateBadge();
+
+// Lädt bei Installation/Update die verfügbaren A/B-Testgruppen, damit die
+// Options-Seite (A/B-Gruppe-Tab) sie sofort zur Auswahl anbieten kann, ohne
+// dass der User erst manuell "neu laden" klicken muss.
+chrome.runtime.onInstalled.addListener(async () => {
+  try {
+    const res = await fetch("https://abgroup.zdf.de/test.json");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data?.groups)) {
+      await chrome.storage.local.set({
+        abGroups: data.groups,
+        abGroupMeta: { name: data.name || "", expirationDate: data.expirationDate || "" }
+      });
+    }
+  } catch {
+    // Kein Netz o.ä. beim Install — Options-Seite bietet "Gruppen neu laden" als Fallback.
+  }
+});
+
+// Badge folgt bandActive/bandConfigs, unabhängig davon wer sie ändert (Popup/Options).
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.isActive) setBadge(changes.isActive.newValue !== false);
+  if (area === "local" && (changes.bandActive || changes.bandConfigs || changes.nextVideoConfig)) updateBadge();
+});
+
+// ---------- A/B-Gruppe: direktes Setzen im localStorage der Zielseite ----------
+// zdf.de entscheidet die A/B-Testgruppe aus dem Zustand-Persist-Store im
+// localStorage-Key "local-user-data" (state.abGroup = {name, expirationDate,
+// group}), NICHT aus der URL. Popup schreibt hier direkt rein (echtes
+// "Setzen", kein An/Aus-Override) und lädt die Seite danach neu.
+
+function readAbGroupInPage() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem("local-user-data") || "null");
+    return parsed?.state?.abGroup?.group || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeAbGroupInPage(group, meta) {
+  const STORAGE_KEY = "local-user-data";
+  let parsed;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    parsed = raw ? JSON.parse(raw) : { state: {}, version: 1 };
+  } catch {
+    parsed = { state: {}, version: 1 };
+  }
+  parsed.state = parsed.state || {};
+  parsed.state.abGroup = {
+    expirationDate: meta?.expirationDate || parsed.state.abGroup?.expirationDate || "",
+    name: meta?.name || parsed.state.abGroup?.name || "",
+    group
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action !== "getAbGroup") return;
+  (async () => {
+    const [result] = await chrome.scripting.executeScript({ target: { tabId: message.tabId }, func: readAbGroupInPage }).catch(() => [null]);
+    sendResponse({ group: result?.result ?? null });
+  })();
+  return true;
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action !== "setAbGroup") return;
+  (async () => {
+    const { abGroupMeta } = await chrome.storage.local.get("abGroupMeta");
+    await chrome.scripting.executeScript({
+      target: { tabId: message.tabId }, func: writeAbGroupInPage, args: [message.group, abGroupMeta || {}]
+    }).catch(() => {});
+    sendResponse({ ok: true });
+  })();
+  return true;
 });
 
 // Fetcht konfigurierte Empfehlungs-Endpunkte für Content-Scripts. Läuft im

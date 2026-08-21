@@ -354,15 +354,34 @@ export let historyPresets = [];
 export let configs = [];
 export let jsonTemplates = [];
 export let pageTypes = [];
+export let abGroups = [];
+export let abGroupMeta = { name: "", expirationDate: "" };
 
 const uid = () => crypto.randomUUID();
+
+export const AB_GROUPS_SOURCE_URL = "https://abgroup.zdf.de/test.json";
+
+export async function fetchAbGroups() {
+  const res = await fetch(AB_GROUPS_SOURCE_URL);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (!Array.isArray(data?.groups)) throw new Error("Unerwartetes Format (kein groups[]-Feld).");
+  abGroups = data.groups;
+  abGroupMeta = { name: data.name || "", expirationDate: data.expirationDate || "" };
+  await chrome.storage.local.set({ abGroups, abGroupMeta });
+  return abGroups;
+}
 
 export async function loadState() {
   const stored = await chrome.storage.local.get([
     "sagemakerEndpoints", "historyPresets", "configs", "jsonTemplates", "pageTypes",
+    "abGroups", "abGroupMeta",
     "endpoints", "combos", // Zwischenschema (Vorgänger-Iteration)
     "bandConfigs", "nextVideoConfig" // ursprüngliches flaches Schema
   ]);
+
+  abGroups = stored.abGroups || [];
+  abGroupMeta = stored.abGroupMeta || { name: "", expirationDate: "" };
 
   // Nur bei komplett fehlendem Key vorbelegen — ein leeres Array bedeutet,
   // der User hat alle Einträge bewusst gelöscht, das bleibt so.

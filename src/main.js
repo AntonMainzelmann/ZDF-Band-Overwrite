@@ -29,9 +29,10 @@
   window.addEventListener("popstate", notifyNavigation);
   chrome.runtime.sendMessage({ action: "pageNavigated" }).catch(() => {}); // initialer Seitenaufruf
 
-  // Zustand pro Band (Map: label -> { isOverwritten, cachedTemplate, config }).
+  // Zustand pro Band (Map: label -> { isOverwritten, cachedTemplate, config, active }).
   const bandState = new Map();
-  let userDeactivated = false; // Verhindert Auto-Overwrite nach manuellem Deaktivieren
+  const NEXT_VIDEO_KEY = "__nextVideo__"; // Toggle-Key für den Next-Video-Eintrag im Popup
+  let nextVideoActive = true;
 
   // Findet die Ziel-Lane anhand des aria-label.
   function findLaneByLabel(label) {
@@ -230,12 +231,13 @@
   }
 
   function tryOverwrite(label) {
-    if (userDeactivated) return;
+    const state = bandState.get(label);
+    if (!state?.active) return;
     const lane = findLaneByLabel(label);
     if (!lane) return;
     // Warten bis Kacheln drin sind (nicht nur Skeleton)
     if (!lane.querySelector('[data-testid="teaser-tile"]')) return;
-    if (lane.dataset.overwritten === "1" || bandState.get(label).isOverwritten) return;
+    if (lane.dataset.overwritten === "1" || state.isOverwritten) return;
     overwriteLane(label, lane);
   }
 
@@ -249,7 +251,7 @@
     if (!msg || msg.source !== "zdf-nv-interceptor" || msg.type !== "request") return;
 
     let result = null;
-    if (!userDeactivated && nextVideoConfig?.endpoint) {
+    if (nextVideoActive && nextVideoConfig?.endpoint) {
       result = await window.zdfApi.fetchNextVideoOverride(msg, nextVideoConfig).catch(() => null);
     }
     window.postMessage({ source: "zdf-nv-bridge", type: "response", id: msg.id, result }, "*");
@@ -257,9 +259,10 @@
 
   // Warten bis die konfigurierten Bänder im DOM sind.
   async function start() {
-    const { isActive, bandConfigs = [], nextVideoConfig: nvConfig } = await chrome.storage.local.get(["isActive", "bandConfigs", "nextVideoConfig"]);
-    userDeactivated = isActive === false;
+    const { bandActive = {}, bandConfigs = [], nextVideoConfig: nvConfig } =
+      await chrome.storage.local.get(["bandActive", "bandConfigs", "nextVideoConfig"]);
     nextVideoConfig = nvConfig?.endpoint ? nvConfig : null;
+    nextVideoActive = bandActive[NEXT_VIDEO_KEY] !== false;
 
     if (bandConfigs.length === 0) {
       log("Keine Bänder konfiguriert (siehe Erweiterungs-Optionen).");
@@ -267,7 +270,10 @@
     }
 
     for (const config of bandConfigs) {
-      bandState.set(config.label, { isOverwritten: false, cachedTemplate: null, config });
+      bandState.set(config.label, {
+        isOverwritten: false, cachedTemplate: null, config,
+        active: bandActive[config.label] !== false
+      });
     }
 
     for (const config of bandConfigs) {
@@ -342,20 +348,23 @@
       return;
     }
     if (message.action === "toggleOverwrite") {
-      log("Received toggleOverwrite message. ForceState:", message.forceState);
+      log("Received toggleOverwrite message.", message.label, message.forceState);
 
-      const anyOverwritten = [...bandState.values()].some(s => s.isOverwritten);
-      const targetState = message.forceState !== undefined ? message.forceState : !anyOverwritten;
+      if (message.label === NEXT_VIDEO_KEY) {
+        nextVideoActive = message.forceState;
+        return;
+      }
 
-      userDeactivated = !targetState;
-      for (const label of bandState.keys()) {
-        const lane = findLaneByLabel(label);
-        if (!lane) continue;
-        if (targetState) {
-          overwriteLane(label, lane);
-        } else {
-          restoreOriginalLane(label, lane);
-        }
+      const state = bandState.get(message.label);
+      if (!state) return;
+      state.active = message.forceState;
+
+      const lane = findLaneByLabel(message.label);
+      if (!lane) return;
+      if (state.active) {
+        overwriteLane(message.label, lane);
+      } else {
+        restoreOriginalLane(message.label, lane);
       }
     }
   });

@@ -1,4 +1,5 @@
 node_modules/
 dist/
+addon.zip
 .DS_Store
 .scratch_ext_snap.txt

@@ -1,16 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node -e \"JSON.parse ? 1:1\")",
-      "Bash(node --check src/zdf_api.js)",
-      "Bash(node --check src/nextvideo_interceptor.js)",
-      "Bash(python3 -c \"import json; json.load\\(open\\('src/manifest.json'\\)\\)\")",
-      "mcp__chrome-devtools__select_page",
-      "mcp__chrome-devtools__press_key",
-      "Bash(node --check /Users/ronny/ZDF_MOVED/git_zdf/zdf-debug/src/nextvideo_interceptor.js)",
-      "Bash(node --check /Users/ronny/ZDF_MOVED/git_zdf/zdf-debug/src/zdf_api.js)",
-      "Bash(node --check /Users/ronny/ZDF_MOVED/git_zdf/zdf-debug/src/main.js)",
-      "Bash(node --check /Users/ronny/ZDF_MOVED/git_zdf/zdf-debug/src/background.js)"
+      "Bash(sips -g pixelWidth -g pixelHeight -g hasAlpha /Users/ronny/ZDF_MOVED/git_zdf/zdf-debug/src/icons/m1_on.png /Users/ronny/ZDF_MOVED/git_zdf/zdf-debug/src/icons/m1_off.png)",
+      "Bash(python3 -c \"import PIL; print\\(PIL.__version__\\)\")",
+      "Bash(sips -z 128 128 m1_on.png --out m1_on_clean.png)",
+      "Bash(sips -z 128 128 m1_off.png --out m1_off_clean.png)",
+      "Bash(python3 -)",
+      "Bash(convert -version)",
+      "Bash(docker --version)",
+      "Bash(git -C /Users/ronny/ZDF_MOVED/git_zdf/zdf-debug status --short -- src/abgroup_override.js)",
+      "Read(//tmp/**)",
+      "Read(//private/tmp/**)",
+      "Bash(unzip -l addon.zip)"
     ]
   }
 }

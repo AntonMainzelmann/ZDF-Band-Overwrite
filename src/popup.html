@@ -22,22 +22,24 @@
   .head h1 .dot { color: var(--accent); }
 
   .toggleRow {
-    display: flex; align-items: center; gap: 0.6rem; margin: 0 0.9rem 0.8rem;
-    padding: 0.55rem 0.7rem; background: var(--panel); border: 1px solid var(--border);
-    border-radius: 8px; cursor: pointer; font-size: 0.85rem; text-align: left;
+    display: flex; align-items: center; gap: 0.6rem; width: 100%;
+    padding: 0.5rem 0.7rem; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 7px; cursor: pointer; font: inherit; font-size: 0.85rem; text-align: left;
   }
   .toggleRow .dot2 {
-    width: 0.85rem; height: 0.85rem; border-radius: 50%; background: #ccc; flex-shrink: 0;
+    width: 0.8rem; height: 0.8rem; border-radius: 50%; background: #ccc; flex-shrink: 0;
   }
   .toggleRow.on .dot2 { background: var(--accent); }
   .toggleRow:hover { background: #f7f7f8; }
+  .toggleRow .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toggleRow .state { color: var(--text-muted); font-size: 0.78rem; flex-shrink: 0; }
 
   .section { padding: 0 0.9rem 0.9rem; }
   .sectionLabel {
     font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;
     color: var(--text-muted); margin: 0 0 0.4rem; font-weight: 600;
   }
-  .tplList { display: flex; flex-direction: column; gap: 0.3rem; }
+  .tplList, .toggleList { display: flex; flex-direction: column; gap: 0.3rem; }
   .tplBtn {
     display: block; width: 100%; text-align: left; padding: 0.5rem 0.7rem;
     border: 1px solid var(--border); background: var(--panel); border-radius: 7px;
@@ -48,6 +50,12 @@
 
   .hint { font-size: 0.82rem; color: var(--text-muted); margin: 0; }
   .hint a { color: var(--accent); cursor: pointer; }
+
+  .abGroupBox select {
+    width: 100%; padding: 0.45rem 0.6rem; font: inherit; font-size: 0.85rem;
+    border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--text);
+  }
+  .abGroupCurrent { font-size: 0.78rem; color: var(--text-muted); margin: 0.4rem 0 0; }
 
   .footer {
     border-top: 1px solid var(--border); padding: 0.5rem 0.9rem;
@@ -60,10 +68,15 @@
 <body>
   <div class="head"><h1>ZDF Band <span class="dot">•</span> Overwrite</h1></div>
 
-  <button type="button" class="toggleRow" id="toggleActive">
-    <span class="dot2"></span>
-    <span id="toggleLabel">Band Overwrite …</span>
-  </button>
+  <div class="section">
+    <p class="sectionLabel">Bänder</p>
+    <div class="toggleList" id="bandToggleList"></div>
+  </div>
+
+  <div class="section">
+    <p class="sectionLabel">A/B-Gruppe</p>
+    <div class="abGroupBox" id="abGroupBox"></div>
+  </div>
 
   <div class="section">
     <p class="sectionLabel">GetJson</p>
