@@ -48,6 +48,13 @@ scripts/    Build-Script (esbuild, kopiert statische Dateien)
 dist/       Build-Ausgabe — nicht eingecheckt, per npm run build erzeugen
 ```
 
+## Changelog
+
+- DKDI-Band-Overwrite hinzugefügt ("Das könnte Dich interessieren")
+- Next-Video-Overwrite hinzugefügt
+- A/B-Gruppen-Setter hinzugefügt
+- Import/Export-Feature hinzugefügt (Konfiguration als JSON sichern/wiederherstellen, Options-Seite → Export/Import)
+
 ## Hinweis
 
 Internes Debug-Werkzeug, kein offizielles ZDF-Produkt.

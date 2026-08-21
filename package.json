@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
-    "package": "npm run build && cd dist && zip -1 -x \"*screens*\" -x \"*metadata*\" -x \"*/\\.*\" x \".*\" -x \"*.zip\" -r ../addon.zip ."
+    "package": "node scripts/bump-version.mjs && npm run build && cd dist && zip -1 -x \"*screens*\" -x \"*metadata*\" -x \"*/\\.*\" x \".*\" -x \"*.zip\" -r ../addon.zip ."
   },
   "keywords": [],
   "author": "",
