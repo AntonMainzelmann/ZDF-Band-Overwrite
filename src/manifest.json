@@ -5,11 +5,15 @@
   "description": "Ersetzt ein ZDF-Teaser-Band mit hart-codierten Debug-Items.",
   "action": {
     "default_icon": "icons/icon.svg",
-    "default_title": "ZDF Band Overwrite (Debug)"
+    "default_title": "ZDF Band Overwrite (Debug)",
+    "default_popup": "popup.html"
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "options_page": "options.html",
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
   },
   "content_scripts": [
     {

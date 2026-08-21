@@ -5,8 +5,7 @@
   const DEBUG = true;
   const log = (...args) => DEBUG && console.log("[zdf-api]", ...args);
 
-  // Wie viele Empfehlungen maximal geladen werden (begrenzt GraphQL-Last).
-  const MAX_ITEMS = 4;
+  const DEFAULT_MAX_ITEMS = 4;
 
   let cachedToken = null;
 
@@ -53,24 +52,40 @@
     return cachedToken;
   }
 
-  // Löst reco_ids.json über die Web-Accessible-Resource Schnittstelle auf und parst sie
-  async function loadRecoIds() {
+  // Lädt die Empfehlungs-IDs. Ohne konfigurierten Endpunkt: Fallback auf die
+  // gebündelte reco_ids.json (Debug-Default). Mit Endpunkt: Fetch läuft über
+  // background.js, da die Content-Script-Seite (CSP der Zielseite) fremde
+  // Hosts blockieren kann.
+  async function loadRecoIds(endpoint, apiToken, seedIds, maxItems) {
     try {
-      const url = chrome.runtime.getURL("reco_ids.json");
-      log("Lade reco_ids.json von:", url);
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP-Fehler beim Laden von reco_ids.json: ${response.status}`);
+      let data;
+      if (endpoint) {
+        log("Lade Empfehlungs-IDs von konfiguriertem Endpunkt:", endpoint);
+        const body = { body: { history: seedIds || [], n_items: maxItems }, contentType: "application/json" };
+        const res = await chrome.runtime.sendMessage({ action: "fetchJson", url: endpoint, token: apiToken, body });
+        if (!res || res.error) {
+          throw new Error(res?.error || "Unbekannter Fehler beim Endpunkt-Fetch");
+        }
+        data = res.data;
+      } else {
+        const url = chrome.runtime.getURL("reco_ids.json");
+        log("Kein Endpunkt konfiguriert, lade Default reco_ids.json von:", url);
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`HTTP-Fehler beim Laden von reco_ids.json: ${response.status}`);
+        }
+        data = await response.json();
       }
-      const data = await response.json();
-      log("reco_ids.json erfolgreich geladen:", data);
-      if (data && data.body && Array.isArray(data.body.predictions)) {
-        return data.body.predictions.map(pred => pred[0]); // Gibt Array von IDs zurück
+      log("Empfehlungs-IDs erfolgreich geladen:", data);
+      // Bundled reco_ids.json nutzt {body:{predictions}}, der Live-Endpunkt {result:{predictions}}.
+      const predictions = data?.result?.predictions || data?.body?.predictions;
+      if (Array.isArray(predictions)) {
+        return predictions.map(pred => ({ id: pred[0], score: pred[1] }));
       }
-      log("reco_ids.json hat ein ungültiges Format.");
+      log("Antwort hat ein ungültiges Format.");
       return [];
     } catch (e) {
-      console.error("[zdf-api] Fehler beim Laden von reco_ids.json:", e);
+      console.error("[zdf-api] Fehler beim Laden der Empfehlungs-IDs:", e);
       return [];
     }
   }
@@ -103,24 +118,26 @@
 
   const FALLBACK_IMAGE = "https://www.zdf.de/assets/123-challenge-hero-100~1200x480?cb=1765189952318";
 
-  function toItem(id, v) {
+  function toItem(id, v, score) {
     if (!v) {
       // ID existiert nicht in GraphQL (z.B. ARD-IDs) -> lokales Dummy-Fallback
       return {
         id, title: `Empfehlung: ${id.substring(0, 8)}`, href: `/suche?q=${id}`,
-        image: FALLBACK_IMAGE, logo: null, channel: "ZDF", badges: [], subtitle: "Partner-Inhalt"
+        image: FALLBACK_IMAGE, logo: null, channel: "ZDF", badges: [], subtitle: "Partner-Inhalt", score
       };
     }
     const layouts = v.teaser?.imageWithoutLogo?.layouts;
+    const logoLayouts = v.smartCollection?.logo?.layouts;
     return {
       id: v.id || id,
       title: v.title || `Video ${id}`,
       href: v.canonical ? `/${v.canonical}` : `/id/${id}`,
       image: layouts?.dim1200X480 || layouts?.original || FALLBACK_IMAGE,
-      logo: null,
+      logo: logoLayouts?.dim760X340 || logoLayouts?.dim380X170 || null,
       channel: "ZDF",
       badges: ["UT"],
-      subtitle: v.subtitle || v.contentOwner?.title || ""
+      subtitle: v.subtitle || v.contentOwner?.title || "",
+      score
     };
   }
 
@@ -140,6 +157,14 @@
             }
           }
         }
+        smartCollection {
+          logo {
+            layouts {
+              dim380X170
+              dim760X340
+            }
+          }
+        }
         contentOwner {
           title
         }
@@ -148,26 +173,31 @@
   `;
 
   // Fragt alle IDs in einem einzigen GraphQL-Request ab (statt einer Anfrage pro ID).
-  async function fetchDebugItems() {
+  // config: { endpoint?, apiToken?, maxItems? } — ohne endpoint wird die
+  // gebündelte reco_ids.json als Debug-Default verwendet.
+  async function fetchDebugItems(config = {}) {
+    const { endpoint, apiToken, seedIds, maxItems = DEFAULT_MAX_ITEMS } = config;
+
     const token = getCachedToken();
     if (!token) {
       log("Fehler: Kein API-Token gefunden. Breche ab.");
       return [];
     }
 
-    const allIds = await loadRecoIds();
-    if (allIds.length === 0) {
-      log("Keine IDs in reco_ids.json gefunden oder Datei fehlerhaft. Breche ab.");
+    const allPredictions = await loadRecoIds(endpoint, apiToken, seedIds, maxItems);
+    if (allPredictions.length === 0) {
+      log("Keine Empfehlungs-IDs gefunden. Breche ab.");
       return [];
     }
 
-    const ids = allIds.slice(0, MAX_ITEMS);
-    log(`Lade ${ids.length} von ${allIds.length} IDs gebatcht (ein Request) aus der ZDF-GraphQL-API...`);
+    const predictions = allPredictions.slice(0, maxItems);
+    const ids = predictions.map(p => p.id);
+    log(`Lade ${ids.length} von ${allPredictions.length} IDs gebatcht (ein Request) aus der ZDF-GraphQL-API...`);
 
     try {
       const data = await fetchGraphQL(GQL_VIDEOS_BY_IDS, { ids }, token);
       const byId = new Map((data?.videosByIds || []).filter(Boolean).map(v => [v.id, v]));
-      const items = ids.map(id => toItem(id, byId.get(id)));
+      const items = predictions.map(p => toItem(p.id, byId.get(p.id), p.score));
       log(`Erfolgreich geladen: ${items.length} von ${ids.length} Items.`);
       return items;
     } catch (e) {
