@@ -22,6 +22,14 @@
   "permissions": ["storage", "scripting"],
   "host_permissions": ["<all_urls>"],
   "options_page": "options.html",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "zdf-band-overwrite-debug@antonmainzelmann.github",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  },
   "background": {
     "service_worker": "background.js",
     "scripts": ["background.js"]

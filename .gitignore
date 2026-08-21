@@ -3,5 +3,5 @@ dist/
 addon.zip
 .DS_Store
 .scratch_ext_snap.txt
-.claude
-.vscode
+.claude/
+.vscode/
