@@ -239,10 +239,27 @@
     overwriteLane(label, lane);
   }
 
+  // Next-Video: Brücke für nextvideo_interceptor.js (MAIN world, kein
+  // chrome.*-Zugriff dort). Hält die aktuelle Config, damit der Listener sie
+  // nicht bei jedem Request neu aus dem Storage lesen muss.
+  let nextVideoConfig = null;
+  window.addEventListener("message", async (event) => {
+    if (event.source !== window) return;
+    const msg = event.data;
+    if (!msg || msg.source !== "zdf-nv-interceptor" || msg.type !== "request") return;
+
+    let result = null;
+    if (!userDeactivated && nextVideoConfig?.endpoint) {
+      result = await window.zdfApi.fetchNextVideoOverride(msg, nextVideoConfig).catch(() => null);
+    }
+    window.postMessage({ source: "zdf-nv-bridge", type: "response", id: msg.id, result }, "*");
+  });
+
   // Warten bis die konfigurierten Bänder im DOM sind.
   async function start() {
-    const { isActive, bandConfigs = [] } = await chrome.storage.local.get(["isActive", "bandConfigs"]);
+    const { isActive, bandConfigs = [], nextVideoConfig: nvConfig } = await chrome.storage.local.get(["isActive", "bandConfigs", "nextVideoConfig"]);
     userDeactivated = isActive === false;
+    nextVideoConfig = nvConfig?.endpoint ? nvConfig : null;
 
     if (bandConfigs.length === 0) {
       log("Keine Bänder konfiguriert (siehe Erweiterungs-Optionen).");

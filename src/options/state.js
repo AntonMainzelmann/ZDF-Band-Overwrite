@@ -267,9 +267,54 @@ const COLLECTION_REFERENCE_QUERY = `
     }
   `;
 
+// Nachschlage-Referenz für Genre-/Themen-Seiten (z.B. /dokus) — Felder live
+// gegen die API verifiziert (canonical einer MetaCollection ist ihre eigene
+// ID, z.B. "pub-form-10003", NICHT der URL-Slug der Seite, siehe Kommentar
+// bei KNOWN_CANONICAL_FIELDS in background.js).
+const META_COLLECTION_REFERENCE_QUERY = `
+    query MetaCollectionByCanonical($canonical: String!) {
+      metaCollectionByCanonical(canonical: $canonical) {
+        id
+        canonical
+        title
+        metaType
+        sharingUrl
+        webUrl
+        recoModel
+        infoText
+        visible
+        structuralMetadata {
+          isChildrenContent
+          isNewsContent
+          isSportContent
+        }
+        teaser {
+          title
+          description
+          image {
+            altText
+            caption
+            list
+          }
+        }
+        seo {
+          title
+          description
+          keywords
+        }
+        og {
+          title
+          description
+          type
+        }
+      }
+    }
+  `;
+
 export const QUERY_REFERENCE = [
   { name: "Video", query: VIDEO_REFERENCE_QUERY },
-  { name: "Collection", query: COLLECTION_REFERENCE_QUERY }
+  { name: "Collection", query: COLLECTION_REFERENCE_QUERY },
+  { name: "MetaCollection", query: META_COLLECTION_REFERENCE_QUERY }
 ];
 
 const COMBINED_JSON_TEMPLATE_NAME = "Seite (Video + Collection)";

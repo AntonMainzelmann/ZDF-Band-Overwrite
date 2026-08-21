@@ -61,6 +61,27 @@ function extractCanonicalFromUrl(url) {
   return segments[segments.length - 1] || "";
 }
 
+// Läuft im Seitenkontext, analog zu extractTokenInPage(). Next.js kann den
+// URL-Slug serverseitig per Rewrite auf einen anderen Canonical-Wert
+// umschreiben, bevor die Seite rendert (z.B. /dokus -> "pub-form-10003" bei
+// MetaCollection-Seiten) — der URL-Slug ist dann für GraphQL-Probes nutzlos.
+// Next.js kodiert das aufgelöste Routensegment im RSC-Hydration-Payload
+// (self.__next_f.push(...), siehe DevTools "Elements" auf einer Seite mit
+// Rewrite) als ["canonical","<wert>","d",[]] — Anführungszeichen können dort
+// je nach Verschachtelungstiefe des umgebenden Strings escaped sein, daher
+// \\? statt fixer Erwartung. Kein Treffer (z.B. Seiten ohne Rewrite) ->
+// null, Aufrufer fällt auf extractCanonicalFromUrl() zurück.
+function extractResolvedCanonicalInPage() {
+  const scripts = [...document.querySelectorAll("script")];
+  for (const s of scripts) {
+    const text = s.textContent;
+    if (!text || !text.includes("__next_f")) continue;
+    const match = text.match(/\\?"canonical\\?",\\?"([^"\\]+)\\?",\\?"d\\?",\\?\[\\?\]\\?\]/);
+    if (match) return match[1];
+  }
+  return null;
+}
+
 // Templates deklarieren ihre Variable unterschiedlich ($canonical, $id, ...) —
 // erste deklarierte Variable bekommt den aus der URL extrahierten Wert, ein
 // evtl. vorhandenes $first pauschal 1.
@@ -77,6 +98,11 @@ async function getTokenForTab(tabId) {
   return result?.result ?? null;
 }
 
+async function getCanonicalForTab(tabId, url) {
+  const [result] = await chrome.scripting.executeScript({ target: { tabId }, func: extractResolvedCanonicalInPage }).catch(() => [null]);
+  return result?.result || extractCanonicalFromUrl(url);
+}
+
 async function fetchGraphQLRaw(query, variables, token) {
   const res = await fetch("https://api.zdf.de/graphql", {
     method: "POST",
@@ -88,20 +114,21 @@ async function fetchGraphQLRaw(query, variables, token) {
   return json.data;
 }
 
-// Kein bekannter Seitentyp passt -> per Introspection nach *ByCanonical-Feldern
-// suchen, die wir noch nicht kennen, und den Treffer als neuen Seitentyp
-// speichern. So "lernt" die Extension neue Seitentypen automatisch dazu, statt
-// sie hart zu codieren. Bricht nur, wenn ZDF Introspection sperrt — dann bleibt
-// der Typ schlicht unbekannt (kein Absturz, siehe Aufrufer).
+// ZDF sperrt GraphQL-Introspection in Produktion (__schema liefert
+// INTROSPECTION_DISABLED) — Kandidaten für neue Seitentypen kommen daher aus
+// einer festen Liste bekannter *ByCanonical-Felder statt aus Schema-Abfrage.
+// Per Hand gegen die API verifiziert (siehe Kommentar): videoByCanonical und
+// smartCollectionByCanonical sind schon als Default-Seitentypen registriert,
+// metaCollectionByCanonical existiert zusätzlich im Schema. Liste manuell
+// erweitern, wenn ZDF ein neues *ByCanonical-Feld einführt.
+const KNOWN_CANONICAL_FIELDS = ["videoByCanonical", "smartCollectionByCanonical", "metaCollectionByCanonical"];
+
+// Kein bekannter Seitentyp passt -> Kandidaten aus KNOWN_CANONICAL_FIELDS
+// durchprobieren und den Treffer als neuen Seitentyp speichern. So "lernt"
+// die Extension neue Seitentypen automatisch dazu, statt sie hart zu codieren.
 async function learnNewPageType(canonical, token, existingPageTypes) {
-  const introspection = await fetchGraphQLRaw(
-    "query { __schema { queryType { fields { name args { name } } } } }", {}, token
-  );
-  const fields = introspection?.__schema?.queryType?.fields || [];
   const known = new Set(existingPageTypes.map(p => p.marker));
-  const candidates = fields
-    .filter(f => f.name.endsWith("ByCanonical") && f.args?.some(a => a.name === "canonical") && !known.has(f.name))
-    .map(f => f.name);
+  const candidates = KNOWN_CANONICAL_FIELDS.filter(f => !known.has(f));
   if (candidates.length === 0) return null;
 
   const query = `query ProbeNewPageType($canonical: String!) { ${candidates.map((f, i) => `n${i}: ${f}(canonical: $canonical) { __typename }`).join(" ")} }`;
@@ -140,7 +167,7 @@ async function probePageType(canonical, token, pageTypes) {
 
 async function detectPageType(tabId) {
   const tab = await chrome.tabs.get(tabId);
-  const canonical = extractCanonicalFromUrl(tab.url);
+  const canonical = await getCanonicalForTab(tabId, tab.url);
   const token = await getTokenForTab(tabId);
   const { pageTypes = [] } = await chrome.storage.local.get("pageTypes");
   return await probePageType(canonical, token, pageTypes);
@@ -148,7 +175,7 @@ async function detectPageType(tabId) {
 
 async function runJsonTemplate(tpl, tab) {
   try {
-    const canonical = extractCanonicalFromUrl(tab.url);
+    const canonical = await getCanonicalForTab(tab.id, tab.url);
     const token = await getTokenForTab(tab.id);
     if (!token) throw new Error("Kein API-Token auf der Seite gefunden.");
 

@@ -52,33 +52,21 @@
     return cachedToken;
   }
 
-  // Lädt die Empfehlungs-IDs. Ohne konfigurierten Endpunkt: Fallback auf die
-  // gebündelte reco_ids.json (Debug-Default). Mit Endpunkt: Fetch läuft über
-  // background.js, da die Content-Script-Seite (CSP der Zielseite) fremde
-  // Hosts blockieren kann.
+  // Lädt die Empfehlungs-IDs vom konfigurierten SageMaker-Endpunkt. Fetch läuft
+  // über background.js, da die Content-Script-Seite (CSP der Zielseite) fremde
+  // Hosts blockieren kann. Ohne Endpunkt: keine Items (state.js filtert Configs
+  // ohne nutzbaren Endpunkt eh schon vorher raus, siehe isEndpointUsable).
   async function loadRecoIds(endpoint, apiToken, seedIds, maxItems) {
+    if (!endpoint) return [];
     try {
-      let data;
-      if (endpoint) {
-        log("Lade Empfehlungs-IDs von konfiguriertem Endpunkt:", endpoint);
-        const body = { body: { history: seedIds || [], n_items: maxItems }, contentType: "application/json" };
-        const res = await chrome.runtime.sendMessage({ action: "fetchJson", url: endpoint, token: apiToken, body });
-        if (!res || res.error) {
-          throw new Error(res?.error || "Unbekannter Fehler beim Endpunkt-Fetch");
-        }
-        data = res.data;
-      } else {
-        const url = chrome.runtime.getURL("reco_ids.json");
-        log("Kein Endpunkt konfiguriert, lade Default reco_ids.json von:", url);
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`HTTP-Fehler beim Laden von reco_ids.json: ${response.status}`);
-        }
-        data = await response.json();
+      log("Lade Empfehlungs-IDs von konfiguriertem Endpunkt:", endpoint);
+      const body = { body: { history: seedIds || [], n_items: maxItems }, contentType: "application/json" };
+      const res = await chrome.runtime.sendMessage({ action: "fetchJson", url: endpoint, token: apiToken, body });
+      if (!res || res.error) {
+        throw new Error(res?.error || "Unbekannter Fehler beim Endpunkt-Fetch");
       }
-      log("Empfehlungs-IDs erfolgreich geladen:", data);
-      // Bundled reco_ids.json nutzt {body:{predictions}}, der Live-Endpunkt {result:{predictions}}.
-      const predictions = data?.result?.predictions || data?.body?.predictions;
+      log("Empfehlungs-IDs erfolgreich geladen:", res.data);
+      const predictions = res.data?.result?.predictions;
       if (Array.isArray(predictions)) {
         return predictions.map(pred => ({ id: pred[0], score: pred[1] }));
       }
@@ -173,8 +161,7 @@
   `;
 
   // Fragt alle IDs in einem einzigen GraphQL-Request ab (statt einer Anfrage pro ID).
-  // config: { endpoint?, apiToken?, maxItems? } — ohne endpoint wird die
-  // gebündelte reco_ids.json als Debug-Default verwendet.
+  // config: { endpoint?, apiToken?, maxItems? } — ohne endpoint keine Items.
   async function fetchDebugItems(config = {}) {
     const { endpoint, apiToken, seedIds, maxItems = DEFAULT_MAX_ITEMS } = config;
 
@@ -206,9 +193,57 @@
     }
   }
 
+  // Für den Next-Video-Overwrite (siehe main.js/nextvideo_interceptor.js):
+  // holt Empfehlungen und fragt sie mit genau der Feld-Selektion ab, die der
+  // Player selbst angefragt hat, damit die Antwort strukturell exakt passt.
+  // nextVideo() liefert kein Video direkt, sondern { recoId, clusterId,
+  // configuration, items: [Video] } — bei request.itemsSelection wird dieser
+  // Wrapper nachgebaut (Tracking-IDs sind für unsere Zwecke egal, nur die
+  // Video-Liste zählt), sonst (request.singleSelection) einfach das Video.
+  async function fetchNextVideoOverride(request, config = {}) {
+    const { videoId, itemsSelection, singleSelection, scalarFields, varDefs, variables } = request;
+    const { endpoint, apiToken, seedIds, maxItems = DEFAULT_MAX_ITEMS } = config;
+    const perVideoSelection = itemsSelection || singleSelection;
+    if (!perVideoSelection) return null;
+
+    const token = getCachedToken();
+    if (!token) return null;
+
+    // Keine History konfiguriert -> aktuelles Video als History verwenden.
+    const history = seedIds && seedIds.length ? seedIds : [videoId];
+    const count = itemsSelection ? maxItems : 1;
+    const predictions = await loadRecoIds(endpoint, apiToken, history, count);
+    if (predictions.length === 0) return null;
+    const ids = predictions.map(p => p.id);
+
+    const overrideVarDefs = `(${[...(varDefs || []), "$__ids: [String!]!"].join(", ")})`;
+    const query = `query NextVideoOverride${overrideVarDefs} { videosByIds(ids: $__ids) { ${perVideoSelection} } }`;
+    try {
+      const data = await fetchGraphQL(query, { ...variables, __ids: ids }, token);
+      const byId = new Map((data?.videosByIds || []).filter(Boolean).map(v => [v.id, v]));
+      const videos = ids.map(id => byId.get(id)).filter(Boolean);
+      if (videos.length === 0) return null;
+
+      if (!itemsSelection) return videos[0];
+
+      const wrapper = {};
+      for (const name of scalarFields) {
+        wrapper[name] = name === "configuration"
+          ? (variables?.configuration ?? variables?.input?.configuration ?? null)
+          : crypto.randomUUID(); // recoId/clusterId etc.: reine Tracking-IDs, Wert egal
+      }
+      wrapper.items = videos;
+      return wrapper;
+    } catch (e) {
+      log("Next-Video-Override fehlgeschlagen:", e.message);
+      return null;
+    }
+  }
+
   // Exportiere das API-Modul auf das globale window-Objekt für main.js
   window.zdfApi = {
-    fetchDebugItems
+    fetchDebugItems,
+    fetchNextVideoOverride
   };
 
 })();

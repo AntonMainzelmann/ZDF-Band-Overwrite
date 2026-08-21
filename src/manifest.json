@@ -20,12 +20,12 @@
       "matches": ["https://www.zdf.de/*"],
       "js": ["zdf_api.js", "main.js"],
       "run_at": "document_idle"
-    }
-  ],
-  "web_accessible_resources": [
+    },
     {
-      "resources": ["reco_ids.json"],
-      "matches": ["https://www.zdf.de/*"]
+      "matches": ["https://www.zdf.de/*"],
+      "js": ["nextvideo_interceptor.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
     }
   ]
 }
