@@ -370,13 +370,26 @@ function renderAbGroup() {
         `<li>${esc(g.name)}${g.probability != null ? ` (${g.probability}%)` : ""}</li>`).join("")}</ul>`;
 
   el.innerHTML = `
-    <p class="hint">Verfügbare Gruppen — Setzen der Gruppe selbst passiert im Popup auf zdf.de, hier wird nur die Liste aktuell gehalten.</p>
+    <label class="switch">
+      <input type="checkbox" id="abGroupEnabled" ${state.abGroupSettings.enabled ? "checked" : ""}>
+      <span class="track"></span>
+      A/B-Gruppenauswahl aktiv
+    </label>
+    <p class="hint">Aus: das Popup zeigt die Gruppenauswahl nicht mehr an. Eine bereits gesetzte Gruppe
+      bleibt im <code>local-user-data</code>-localStorage von zdf.de stehen — der Schalter setzt nichts zurück.</p>
+
+    <p class="hint" style="margin-top:1rem;">Verfügbare Gruppen — Setzen der Gruppe selbst passiert im Popup auf zdf.de, hier wird nur die Liste aktuell gehalten.</p>
     ${groupList}
     <div class="testRow">
       <button type="button" class="btn small" id="reloadAbGroups">Gruppen neu laden</button>
       <span class="testResult" id="abGroupReloadResult"></span>
     </div>
   `;
+
+  document.getElementById("abGroupEnabled").addEventListener("change", async (e) => {
+    await state.setAbGroupSettings({ enabled: e.target.checked });
+    renderAbGroup();
+  });
 
   document.getElementById("reloadAbGroups").addEventListener("click", async () => {
     const resultEl = document.getElementById("abGroupReloadResult");

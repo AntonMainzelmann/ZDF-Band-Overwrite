@@ -25,7 +25,6 @@
     border-right: 1px solid var(--border); padding: 1.5rem 1rem;
   }
   .brand { font-weight: 700; font-size: 1rem; margin-bottom: 1.5rem; letter-spacing: -0.01em; }
-  .brand .dot { color: var(--accent); }
   .navBtn {
     display: block; width: 100%; text-align: left; padding: 0.6rem 0.8rem;
     border: none; background: none; border-radius: 8px; font: inherit; font-size: 0.92rem;
@@ -33,6 +32,11 @@
   }
   .navBtn:hover { background: #f0f1f3; color: var(--text); }
   .navBtn.active { background: #fff1e6; color: var(--accent); font-weight: 600; }
+  .navBtn.sub { padding-left: 1.5rem; font-size: 0.88rem; }
+  .navGroup {
+    margin: 1.1rem 0 0.35rem; padding: 0 0.8rem; font-size: 0.7rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); opacity: 0.75;
+  }
 
   .content { flex: 1; padding: 2rem 2.5rem; max-width: 1400px; }
 
@@ -119,8 +123,19 @@
   .btn.primary.flash-ok { background: #1a7f37; border-color: #1a7f37; }
   .btn.primary.flash-error { background: var(--danger); border-color: var(--danger); }
   .visuallyHidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
-  .sidebarFooter { position: fixed; bottom: 1.5rem; left: 1rem; display: flex; gap: 0.4rem; }
-  .sidebarFooter .btn { flex: 1; }
+  .sidebarFooter { position: fixed; bottom: 1.25rem; left: 1rem; width: calc(220px - 2rem); }
+  .footerBtns { display: flex; gap: 0.4rem; }
+  .footerBtn {
+    flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+    padding: 0.45rem 0.6rem; font-size: 0.82rem; color: var(--text-muted);
+    background: #f7f7f8; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+  }
+  .footerBtn:hover { background: #f0f1f3; color: var(--text); }
+  .footerBtn .ico { font-size: 0.9em; opacity: 0.7; }
+  .version {
+    margin: 0.6rem 0 0; text-align: center; font-size: 0.7rem;
+    color: var(--text-muted); opacity: 0.55; letter-spacing: 0.03em;
+  }
 
   .switch { display: inline-flex; align-items: center; gap: 0.6rem; cursor: pointer; font-size: 0.92rem; }
   .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
@@ -139,18 +154,25 @@
 </head>
 <body>
   <nav class="sidebar">
-    <div class="brand">ZDF Band <span class="dot">•</span> Overwrite</div>
-    <button class="navBtn" data-view="start">Start</button>
-    <button class="navBtn" data-view="endpoints">Endpunkte</button>
-    <button class="navBtn" data-view="history">History-Presets</button>
-    <button class="navBtn" data-view="pageTypes">Seitentypen</button>
-    <button class="navBtn" data-view="jsonTemplates">JSON-Templates</button>
-    <button class="navBtn" data-view="abGroup">A/B-Gruppe</button>
-    <button class="navBtn" data-view="quickSearch">Quick Search</button>
-    <button class="navBtn" data-view="trackingEnhancer">Tracking Enhancer</button>
+    <div class="brand">ZDF Toolkit</div>
+    <button class="navBtn" data-view="start">Reco Overwrite</button>
+    <button class="navBtn sub" data-view="endpoints">Endpunkte</button>
+    <button class="navBtn sub" data-view="history">History-Presets</button>
+
+    <p class="navGroup">GetJson</p>
+    <button class="navBtn sub" data-view="jsonTemplates">JSON-Templates</button>
+    <button class="navBtn sub" data-view="pageTypes">Seitentypen</button>
+
+    <p class="navGroup">Werkzeuge</p>
+    <button class="navBtn sub" data-view="abGroup">A/B-Gruppe</button>
+    <button class="navBtn sub" data-view="quickSearch">Quick Search</button>
+    <button class="navBtn sub" data-view="trackingEnhancer">Tracking Enhancer</button>
     <div class="sidebarFooter">
-      <button class="btn small" id="exportBtn">⇩ Export</button>
-      <button class="btn small" id="importBtn">⇧ Import</button>
+      <div class="footerBtns">
+        <button class="footerBtn" id="exportBtn"><span class="ico" aria-hidden="true">⇩</span> Export</button>
+        <button class="footerBtn" id="importBtn"><span class="ico" aria-hidden="true">⇧</span> Import</button>
+      </div>
+      <p class="version" id="versionLabel"></p>
       <input type="file" id="importInput" accept="application/json" class="visuallyHidden">
     </div>
   </nav>
@@ -160,7 +182,7 @@
     <section id="view-start" class="view">
       <div class="topBar">
         <div>
-          <h1>Start</h1>
+          <h1>Reco Overwrite</h1>
           <p class="subhead">Band-Konfigurationen: Typ, Endpunkt und History kombinieren. Pro Label ist genau eine Konfiguration aktiv (Punkt links).</p>
         </div>
         <div class="saveBox"><button class="btn primary" id="save1">Speichern</button><span id="status1" class="statusMsg"></span></div>

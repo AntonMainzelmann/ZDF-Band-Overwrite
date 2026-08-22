@@ -81,6 +81,8 @@ document.getElementById("importInput").addEventListener("change", async (e) => {
   }
 });
 
+document.getElementById("versionLabel").textContent = `v${chrome.runtime.getManifest().version}`;
+
 (async () => {
   await state.loadState();
   renderAll();

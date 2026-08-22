@@ -38,14 +38,35 @@
   let baseUrl = null;
   let lastUrl = location.href;
 
-  const seen = new Map();      // lane-Element -> Map(assetId -> { pos, title })
-  const clickedLanes = new Set();
+  const seen = new Map();      // Cluster-Element -> Map(assetId -> { pos, title })
+  const clickedClusters = new Set();
   const observed = new WeakSet();
   const dwellTimers = new WeakMap();
 
   // ---------- Sichtbarkeit ----------
 
-  const laneOf = (anchor) => anchor.closest('[role="region"][aria-label]');
+  // Zwei Bauformen: Bänder (Startseite, Kollektionen) sind ein horizontales
+  // Karussell mit role="region" + aria-label. Der Empfehlungs-Block auf
+  // Video-Seiten ist dagegen eine schlichte <ol> im Tab-Panel, ganz ohne
+  // Landmark — ohne den zweiten Zweig fiel der komplett durchs Raster.
+  const clusterOf = (anchor) =>
+    anchor.closest('[role="region"][aria-label]') || anchor.closest("ol, ul");
+
+  // Name des Clusters: aria-label beim Band, sonst die Beschriftung des
+  // Tab-Panels ("Empfehlungen") und als letzte Instanz die nächste Überschrift
+  // oberhalb der Liste.
+  function clusterName(container) {
+    const aria = container.getAttribute("aria-label");
+    if (aria) return aria;
+    const panel = container.closest("[role=tabpanel][aria-labelledby]");
+    const tab = panel && document.getElementById(panel.getAttribute("aria-labelledby"));
+    if (tab?.textContent.trim()) return tab.textContent.trim();
+    for (let el = container.parentElement; el; el = el.parentElement) {
+      const heading = [...el.children].find(c => /^H[1-3]$/.test(c.tagName));
+      if (heading) return heading.textContent.trim();
+    }
+    return "";
+  }
 
   // Das h3 einer Kachel enthält zwei divs (Sendungsreihe + Episodentitel) ohne
   // Trennzeichen dazwischen — textContent würde sie zusammenkleben.
@@ -59,18 +80,21 @@
   // in diesem Moment im DOM, eine ID-Auflösung per GraphQL spart man sich damit
   // komplett (die IDs im Beacon bleiben trotzdem die einzige Nutzlast).
   function markSeen(anchor) {
-    const lane = laneOf(anchor);
+    const cluster = clusterOf(anchor);
     const assetId = anchor.getAttribute("aria-controls");
-    if (!lane || !assetId) return;
-    const anchors = [...lane.querySelectorAll("a[aria-controls]")];
-    if (!seen.has(lane)) seen.set(lane, new Map());
-    const laneSeen = seen.get(lane);
-    if (laneSeen.has(assetId)) return;
-    laneSeen.set(assetId, {
+    if (!cluster || !assetId) return;
+    const anchors = [...cluster.querySelectorAll("a[aria-controls]")];
+    // Einzelne verlinkte Listen (Fußzeile, Randnotizen) sind kein Empfehlungs-
+    // Cluster — sonst gingen dafür sinnlose impression-Events raus.
+    if (anchors.length < 2) return;
+    if (!seen.has(cluster)) seen.set(cluster, new Map());
+    const clusterSeen = seen.get(cluster);
+    if (clusterSeen.has(assetId)) return;
+    clusterSeen.set(assetId, {
       pos: anchors.indexOf(anchor),
       title: teaserTitle(anchor) || anchor.getAttribute("href") || assetId
     });
-    log("sichtbar:", lane.getAttribute("aria-label"), assetId, `(${laneSeen.size} von ${anchors.length})`);
+    log("sichtbar:", clusterName(cluster), assetId, `(${clusterSeen.size} von ${anchors.length})`);
   }
 
   const observer = new IntersectionObserver((entries) => {
@@ -105,7 +129,7 @@
     lastUrl = location.href;
     baseUrl = null;
     seen.clear();
-    clickedLanes.clear();
+    clickedClusters.clear();
   }
 
   // ---------- Events senden ----------
@@ -116,18 +140,19 @@
     log("beacon:", url.href);
   }
 
-  function attachTeasers(url, lane, laneSeen, excludeAssetId) {
-    const total = lane.querySelectorAll("a[aria-controls]").length;
-    const defeated = [...laneSeen].filter(([id]) => id !== excludeAssetId);
-    url.searchParams.set("clusterLabel", lane.getAttribute("aria-label") || "");
+  function attachTeasers(url, cluster, clusterSeen, excludeAssetId) {
+    const total = cluster.querySelectorAll("a[aria-controls]").length;
+    const defeated = [...clusterSeen].filter(([id]) => id !== excludeAssetId);
+    const label = clusterName(cluster);
+    url.searchParams.set("clusterLabel", label);
     url.searchParams.set("deliveredTeaserCount", String(total));
-    url.searchParams.set("seenTeaserCount", String(laneSeen.size));
+    url.searchParams.set("seenTeaserCount", String(clusterSeen.size));
     url.searchParams.set("defeatedAssetIds", defeated.map(([id]) => id).join(","));
     url.searchParams.set("defeatedPositions", defeated.map(([, e]) => e.pos).join(","));
 
     if (DEBUG) {
-      console.groupCollapsed(`[tracking-enhancer] ${lane.getAttribute("aria-label")} — ${laneSeen.size} von ${total} sichtbar`);
-      console.table([...laneSeen].map(([id, e]) => ({
+      console.groupCollapsed(`[tracking-enhancer] ${label} — ${clusterSeen.size} von ${total} sichtbar`);
+      console.table([...clusterSeen].map(([id, e]) => ({
         pos: e.pos, titel: e.title, assetId: id,
         status: id === excludeAssetId ? "geklickt" : "defeated"
       })));
@@ -141,14 +166,14 @@
     const targetAssetId = originalUrl.searchParams.get("targetAssetId");
     if (!targetAssetId) return;
 
-    const lane = [...seen.keys()].find(l => seen.get(l).has(targetAssetId))
-      || laneOf(document.querySelector(`a[aria-controls="${CSS.escape(targetAssetId)}"]`) || document.body);
-    if (!lane) return;
+    const cluster = [...seen.keys()].find(c => seen.get(c).has(targetAssetId))
+      || clusterOf(document.querySelector(`a[aria-controls="${CSS.escape(targetAssetId)}"]`) || document.body);
+    if (!cluster) return;
 
-    clickedLanes.add(lane);
-    const laneSeen = seen.get(lane) || new Map();
+    clickedClusters.add(cluster);
+    const clusterSeen = seen.get(cluster) || new Map();
     const url = new URL(originalUrl.href);
-    attachTeasers(url, lane, laneSeen, targetAssetId);
+    attachTeasers(url, cluster, clusterSeen, targetAssetId);
     send(url);
   }
 
@@ -157,14 +182,14 @@
   // GetClusterList-Antwort. clusterLabel ist der Ersatz-Schlüssel.
   function flushImpressions() {
     if (!enabled || !baseUrl) return;
-    for (const [lane, laneSeen] of seen) {
-      if (clickedLanes.has(lane) || laneSeen.size === 0) continue;
+    for (const [cluster, clusterSeen] of seen) {
+      if (clickedClusters.has(cluster) || clusterSeen.size === 0) continue;
       const url = new URL(baseUrl.href);
       url.searchParams.set("eventType", "impression");
-      attachTeasers(url, lane, laneSeen, null);
+      attachTeasers(url, cluster, clusterSeen, null);
       send(url);
     }
-    clickedLanes.clear();
+    clickedClusters.clear();
     seen.clear();
   }
 

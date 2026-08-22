@@ -382,6 +382,17 @@ export async function setQuickSearch(patch) {
 // Tracking Enhancer (tracking_enhancer.js) — eigener Storage-Key wie Quick Search,
 // schreibt sofort ohne Speichern-Button. Default aus: die Events gehen per
 // sendBeacon an den echten tracksrv.zdf.de-Endpunkt, das darf nur bewusst laufen.
+// A/B-Gruppe an/aus — wie Quick Search ein eigener Storage-Key ohne Speichern-Button.
+// Aus heißt: das Popup blendet die Gruppenauswahl aus. Eine schon gesetzte Gruppe
+// bleibt im localStorage von zdf.de stehen, der Schalter setzt nichts zurück.
+export const DEFAULT_AB_GROUP_SETTINGS = { enabled: true };
+export let abGroupSettings = { ...DEFAULT_AB_GROUP_SETTINGS };
+
+export async function setAbGroupSettings(patch) {
+  abGroupSettings = { ...abGroupSettings, ...patch };
+  await chrome.storage.local.set({ abGroupSettings });
+}
+
 export const DEFAULT_TRACKING_ENHANCER = { enabled: false };
 export let trackingEnhancer = { ...DEFAULT_TRACKING_ENHANCER };
 
@@ -408,7 +419,7 @@ export async function fetchAbGroups() {
 export async function loadState() {
   const stored = await chrome.storage.local.get([
     "sagemakerEndpoints", "historyPresets", "configs", "jsonTemplates", "pageTypes",
-    "abGroups", "abGroupMeta", "quickSearch", "trackingEnhancer",
+    "abGroups", "abGroupMeta", "abGroupSettings", "quickSearch", "trackingEnhancer",
     "endpoints", "combos", // Zwischenschema (Vorgänger-Iteration)
     "bandConfigs", "nextVideoConfig" // ursprüngliches flaches Schema
   ]);
@@ -417,6 +428,7 @@ export async function loadState() {
   abGroupMeta = stored.abGroupMeta || { name: "", expirationDate: "" };
   quickSearch = { ...DEFAULT_QUICK_SEARCH, ...(stored.quickSearch || {}) };
   trackingEnhancer = { ...DEFAULT_TRACKING_ENHANCER, ...(stored.trackingEnhancer || {}) };
+  abGroupSettings = { ...DEFAULT_AB_GROUP_SETTINGS, ...(stored.abGroupSettings || {}) };
 
   // Nur bei komplett fehlendem Key vorbelegen — ein leeres Array bedeutet,
   // der User hat alle Einträge bewusst gelöscht, das bleibt so.

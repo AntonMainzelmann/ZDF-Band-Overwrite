@@ -90,7 +90,11 @@ async function renderTrackingEnhancerToggle() {
 
 async function renderAbGroup() {
   const box = document.getElementById("abGroupBox");
-  const { abGroups = [] } = await chrome.storage.local.get("abGroups");
+  const { abGroups = [], abGroupSettings = {} } = await chrome.storage.local.get(["abGroups", "abGroupSettings"]);
+
+  // Aus (Options-Seite) -> Sektion komplett raus, statt einer leeren Auswahl.
+  document.getElementById("abGroupSection").hidden = abGroupSettings.enabled === false;
+  if (abGroupSettings.enabled === false) return;
 
   if (abGroups.length === 0) {
     box.innerHTML = `<p class="hint">Keine Gruppen geladen. <a id="openOptionsInline2">Einstellungen öffnen</a>.</p>`;
