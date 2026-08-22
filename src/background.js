@@ -1,4 +1,4 @@
-// ZDF Band Overwrite — Background Script
+// ZDF Toolkit — Background Script
 // Popup (popup.html/js) ist die Bedienoberfläche: Toggle für Band-Overwrite +
 // Liste der JSON-Templates. Hier laufen nur die Dinge, die DOM-Zugriff auf die
 // Zielseite oder Fetches an fremde Hosts brauchen (CSP der Zielseite kann

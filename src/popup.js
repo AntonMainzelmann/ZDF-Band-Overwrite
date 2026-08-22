@@ -1,4 +1,4 @@
-// ZDF Band Overwrite — Popup
+// ZDF Toolkit — Popup
 // Ersetzt den alten Klick-auf-Icon-toggelt-direkt-Mechanismus und das
 // unstylebare native Kontextmenü: echtes HTML-Popup mit Toggles + Template-Liste.
 

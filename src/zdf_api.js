@@ -1,4 +1,4 @@
-// ZDF Band Overwrite — API & Data Enrichment Module
+// ZDF Toolkit — API & Data Enrichment Module
 (() => {
   "use strict";
 

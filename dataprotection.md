@@ -1,8 +1,8 @@
-# Datenschutzerklärung — ZDF Band Overwrite (Debug)
+# Datenschutzerklärung — ZDF Toolkit (Debug)
 
 Stand: 2026-08-21
 
-Diese Erklärung beschreibt, welche Daten die Chrome-Erweiterung „ZDF Band Overwrite (Debug)" verarbeitet.
+Diese Erklärung beschreibt, welche Daten die Chrome-Erweiterung „ZDF Toolkit (Debug)" verarbeitet.
 
 ## Zweck der Erweiterung
 

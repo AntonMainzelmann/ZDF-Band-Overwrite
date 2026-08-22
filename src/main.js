@@ -1,4 +1,4 @@
-// ZDF Band Overwrite — Debug Extension
+// ZDF Toolkit — Debug Extension
 // Ersetzt die Kacheln konfigurierter Bänder mit Items aus konfigurierten Endpunkten.
 
 (() => {

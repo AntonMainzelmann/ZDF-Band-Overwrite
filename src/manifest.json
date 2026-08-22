@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "ZDF Band Overwrite (Debug)",
+  "name": "ZDF Toolkit (Debug)",
   "version": "0.1.3",
   "description": "Ersetzt ein ZDF-Teaser-Band mit hart-codierten Debug-Items.",
   "icons": {
@@ -16,7 +16,7 @@
       "48": "icons/m1-48.png",
       "128": "icons/m1-128.png"
     },
-    "default_title": "ZDF Band Overwrite (Debug)",
+    "default_title": "ZDF Toolkit (Debug)",
     "default_popup": "popup.html"
   },
   "permissions": [

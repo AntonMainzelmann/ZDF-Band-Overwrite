@@ -1,4 +1,4 @@
-// ZDF Band Overwrite — Next-Video Interceptor (läuft im MAIN world der Seite)
+// ZDF Toolkit — Next-Video Interceptor (läuft im MAIN world der Seite)
 // Muss im Page-Context laufen, weil der NextVideo-Request vom ZDF-Player
 // selbst kommt (window.fetch der Seite), nicht vom Content-Script. MAIN-world
 // Skripte haben aber keinen chrome.*-Zugriff, daher Brücke per postMessage zu

@@ -1,4 +1,4 @@
-// ZDF Band Overwrite — Quick Search (Spotlight-artiges Overlay)
+// ZDF Toolkit — Quick Search (Spotlight-artiges Overlay)
 // Ersetzt die ZDF-eigene Suchseite durch ein Inline-Overlay: Klick auf den
 // "Suche"-Link oder Ctrl+Space öffnet es, Ergebnisse kommen live über die
 // selbe GraphQL-Suche wie /suche (siehe zdf_api.js searchVideos). Vor jeder

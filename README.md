@@ -1,4 +1,4 @@
-# ZDF Band Overwrite (Debug)
+# ZDF Toolkit (Debug)
 
 Chrome-Erweiterung (Manifest V3) zum Debuggen von Teaser-Bändern und Empfehlungen auf zdf.de. Ersetzt konfigurierte Bänder mit Items aus eigenen SageMaker-Endpunkten, erzwingt A/B-Testgruppen und fragt die GraphQL-API direkt ab — alles ohne Backend-Zugriff, nur im Browser.
 
