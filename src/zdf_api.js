@@ -261,11 +261,14 @@
   const SEARCH_RECO_PERSISTED_HASH = "efed72c8e5b40fd0315a7729a62c6b6931c53ed257fb1860de36950c9ab65be9";
 
   function mapSearchItem(item) {
+    // Karten im Overlay sind ~160px breit — dim276X155 (16:9, kleinste verfügbare
+    // Layout-Variante) reicht auch auf Retina, dim380X170 wäre für die Kartengröße
+    // unnötig groß und bremst beim gleichzeitigen Laden vieler Kacheln.
+    const layouts = item.teaser?.imageWithoutLogo?.layouts || item.teaser?.image?.layouts;
     return {
       title: item.title,
       href: item.sharingUrl,
-      image: item.teaser?.imageWithoutLogo?.layouts?.dim380X170
-        || item.teaser?.image?.layouts?.dim380X170 || null
+      image: layouts?.dim276X155 || layouts?.dim380X170 || null
     };
   }
 
@@ -309,28 +312,39 @@
     return json.data;
   }
 
-  async function searchVideos(query, { first = 8 } = {}) {
+  // /suche zeigt zwei Reihen: "Top-Ergebnisse" (beste Treffer über alle Inhaltstypen)
+  // und "Alle Ergebnisse" (breite Liste) — beide über denselben Endpunkt, nur der
+  // mode-Parameter unterscheidet sie. Labels kommen bei dieser Query (anders als bei
+  // SearchRecommendation) nicht vom Server mit, daher hier fest wie auf /suche benannt.
+  async function searchVideos(query, { topFirst = 6, allFirst = 24 } = {}) {
     if (!query) return [];
     try {
       const group = await getAbGroup();
-      const data = await fetchPersistedQuery("getSearchResults", SEARCH_PERSISTED_HASH,
-        { query, mode: "ALL_RESULTS_EXCLUDING_TOP_RESULTS", group, first, after: null });
-      const results = data?.searchDocuments?.results || [];
-      return results.map(r => mapSearchItem(r.item));
+      const [top, all] = await Promise.all([
+        fetchPersistedQuery("getSearchResults", SEARCH_PERSISTED_HASH,
+          { query, mode: "TOP_RESULTS", group, first: topFirst, after: null }),
+        fetchPersistedQuery("getSearchResults", SEARCH_PERSISTED_HASH,
+          { query, mode: "ALL_RESULTS_EXCLUDING_TOP_RESULTS", group, first: allFirst, after: null })
+      ]);
+      return [
+        { label: "Top-Ergebnisse", items: (top?.searchDocuments?.results || []).map(r => mapSearchItem(r.item)) },
+        { label: "Alle Ergebnisse", items: (all?.searchDocuments?.results || []).map(r => mapSearchItem(r.item)) }
+      ];
     } catch (e) {
       log("Suche fehlgeschlagen:", e.message);
       return [];
     }
   }
 
-  // Die "Meistgefunden"-Kachelreihe, die /suche vor jeder Eingabe zeigt. Auch ohne
-  // echte Wiedergabe-Historie liefert der Endpunkt ein generisches Trending-Ranking
-  // (getestet: leere plays/views -> trotzdem volle, sinnvolle Ergebnisse).
-  async function getDefaultResults({ first = 8 } = {}) {
+  // Die Kachelreihen, die /suche vor jeder Eingabe zeigt ("Meistgefunden" +
+  // "Entdecken", per configuration unterschieden). Auch ohne echte
+  // Wiedergabe-Historie liefert der Endpunkt ein generisches Ranking (getestet:
+  // leere plays/views -> trotzdem volle, sinnvolle Ergebnisse).
+  async function fetchRecommendationSection(configuration, first) {
     try {
       const abGroup = await getAbGroup();
       const data = await fetchPersistedQuery("SearchRecommendation", SEARCH_RECO_PERSISTED_HASH, {
-        configuration: "search-history",
+        configuration,
         searchResultsHistory: [],
         input: {
           appId: "zdf-web-21f7c74d",
@@ -340,11 +354,21 @@
           user: { abGroup, userSegment: "segment_6" }
         }
       });
-      return (data?.searchRecommendation?.items || []).map(mapSearchItem);
+      const rec = data?.searchRecommendation;
+      if (!rec) return null;
+      return { label: rec.clusterLabel || configuration, items: rec.items.map(mapSearchItem) };
     } catch (e) {
-      log("Default-Empfehlungen fehlgeschlagen:", e.message);
-      return [];
+      log("Default-Empfehlungen fehlgeschlagen:", configuration, e.message);
+      return null;
     }
+  }
+
+  async function getDefaultSections() {
+    const sections = await Promise.all([
+      fetchRecommendationSection("search-history", 8),
+      fetchRecommendationSection("search-discover", 12)
+    ]);
+    return sections.filter(Boolean);
   }
 
   // Exportiere das API-Modul auf das globale window-Objekt für main.js
@@ -352,7 +376,7 @@
     fetchDebugItems,
     fetchNextVideoOverride,
     searchVideos,
-    getDefaultResults
+    getDefaultSections
   };
 
 })();

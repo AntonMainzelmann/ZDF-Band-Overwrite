@@ -442,6 +442,13 @@ function renderQuickSearch() {
     </label>
     <p class="hint">Aus: Klick auf das Lupen-Icon navigiert wieder normal zu /suche — die Tastenkombination öffnet Quick Search trotzdem weiter.</p>
 
+    <label class="switch" style="margin-top:1rem;">
+      <input type="checkbox" id="qsPreload" ${qs.preloadSearch ? "checked" : ""} ${qs.enabled ? "" : "disabled"}>
+      <span class="track"></span>
+      Preload Search
+    </label>
+    <p class="hint">Lädt Meistgefunden/Kategorien/Entdecken im Hintergrund vor und aktualisiert alle 5 Minuten — Overlay steht beim Öffnen sofort statt erst nachzuladen.</p>
+
     <div class="field" style="margin-top:1rem;">
       <label for="qsShortcutBtn">Tastenkombination</label>
       <button type="button" class="btn" id="qsShortcutBtn" ${qs.enabled ? "" : "disabled"}>${esc(describeShortcut(qs.shortcut))}</button>
@@ -467,6 +474,9 @@ function renderQuickSearch() {
   });
   document.getElementById("qsInterceptClick").addEventListener("change", async (e) => {
     await state.setQuickSearch({ interceptSearchClick: e.target.checked });
+  });
+  document.getElementById("qsPreload").addEventListener("change", async (e) => {
+    await state.setQuickSearch({ preloadSearch: e.target.checked });
   });
 
   const shortcutBtn = document.getElementById("qsShortcutBtn");

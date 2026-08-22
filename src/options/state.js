@@ -363,6 +363,9 @@ export let abGroupMeta = { name: "", expirationDate: "" };
 export const DEFAULT_QUICK_SEARCH = {
   enabled: true,
   interceptSearchClick: true,
+  // Lädt Meistgefunden/Kategorien/Entdecken im Hintergrund vor (alle 5 Min. aufgefrischt),
+  // damit das Overlay beim Öffnen sofort steht statt erst nachzuladen (siehe quick_search.js).
+  preloadSearch: true,
   shortcut: { ctrlKey: true, altKey: false, shiftKey: false, metaKey: false, code: "Space" },
   // { getSearchResults?: string, SearchRecommendation?: string } — voller Query-Text statt
   // Persisted-Query-Hash, per "Query automatisch finden" aus ZDFs Bundle gezogen (siehe
