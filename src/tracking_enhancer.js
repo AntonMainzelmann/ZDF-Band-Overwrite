@@ -38,7 +38,7 @@
   let baseUrl = null;
   let lastUrl = location.href;
 
-  const seen = new Map();      // lane-Element -> Map(assetId -> Position im Band)
+  const seen = new Map();      // lane-Element -> Map(assetId -> { pos, title })
   const clickedLanes = new Set();
   const observed = new WeakSet();
   const dwellTimers = new WeakMap();
@@ -47,6 +47,17 @@
 
   const laneOf = (anchor) => anchor.closest('[role="region"][aria-label]');
 
+  // Das h3 einer Kachel enthält zwei divs (Sendungsreihe + Episodentitel) ohne
+  // Trennzeichen dazwischen — textContent würde sie zusammenkleben.
+  function teaserTitle(anchor) {
+    const h3 = anchor.querySelector("h3");
+    if (!h3) return "";
+    return [...h3.childNodes].map(n => n.textContent.trim()).filter(Boolean).join(" · ");
+  }
+
+  // Titel wird hier mitgenommen, nicht später nachgeschlagen: die Kachel steht
+  // in diesem Moment im DOM, eine ID-Auflösung per GraphQL spart man sich damit
+  // komplett (die IDs im Beacon bleiben trotzdem die einzige Nutzlast).
   function markSeen(anchor) {
     const lane = laneOf(anchor);
     const assetId = anchor.getAttribute("aria-controls");
@@ -55,7 +66,10 @@
     if (!seen.has(lane)) seen.set(lane, new Map());
     const laneSeen = seen.get(lane);
     if (laneSeen.has(assetId)) return;
-    laneSeen.set(assetId, anchors.indexOf(anchor));
+    laneSeen.set(assetId, {
+      pos: anchors.indexOf(anchor),
+      title: teaserTitle(anchor) || anchor.getAttribute("href") || assetId
+    });
     log("sichtbar:", lane.getAttribute("aria-label"), assetId, `(${laneSeen.size} von ${anchors.length})`);
   }
 
@@ -109,7 +123,16 @@
     url.searchParams.set("deliveredTeaserCount", String(total));
     url.searchParams.set("seenTeaserCount", String(laneSeen.size));
     url.searchParams.set("defeatedAssetIds", defeated.map(([id]) => id).join(","));
-    url.searchParams.set("defeatedPositions", defeated.map(([, pos]) => pos).join(","));
+    url.searchParams.set("defeatedPositions", defeated.map(([, e]) => e.pos).join(","));
+
+    if (DEBUG) {
+      console.groupCollapsed(`[tracking-enhancer] ${lane.getAttribute("aria-label")} — ${laneSeen.size} von ${total} sichtbar`);
+      console.table([...laneSeen].map(([id, e]) => ({
+        pos: e.pos, titel: e.title, assetId: id,
+        status: id === excludeAssetId ? "geklickt" : "defeated"
+      })));
+      console.groupEnd();
+    }
   }
 
   // Klick im Band: Original-URL hat schon clusterId, recoId, recoModel,
@@ -180,5 +203,20 @@
   });
   setInterval(scan, SCAN_MS);
 
-  window.__zdfTrackingEnhancer = { get enabled() { return enabled; }, seen, get baseUrl() { return baseUrl; } };
+  // Für IDs, die aus einer Beacon-URL im Network-Tab kopiert wurden: nimmt die
+  // komma-separierte Liste (oder gleich die ganze URL) und schlägt die Titel im
+  // DOM nach. Konsole: __zdfTrackingEnhancer.resolve("<paste>")
+  function resolve(input) {
+    const ids = (input.includes("defeatedAssetIds=")
+      ? decodeURIComponent(new URL(input, location.href).searchParams.get("defeatedAssetIds") || "")
+      : input).split(",").map(s => s.trim()).filter(Boolean);
+    const rows = ids.map(id => {
+      const a = document.querySelector(`a[aria-controls="${CSS.escape(id)}"]`);
+      return { assetId: id, titel: (a && teaserTitle(a)) || "(nicht im DOM)", href: a?.getAttribute("href") || "" };
+    });
+    console.table(rows);
+    return rows;
+  }
+
+  window.__zdfTrackingEnhancer = { get enabled() { return enabled; }, seen, get baseUrl() { return baseUrl; }, resolve };
 })();

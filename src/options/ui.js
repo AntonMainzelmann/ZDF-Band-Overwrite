@@ -11,6 +11,7 @@ export function renderAll() {
   renderQueryReference();
   renderAbGroup();
   renderQuickSearch();
+  renderTrackingEnhancer();
 }
 
 // ---------- Start: Band-Konfigurationen ----------
@@ -390,6 +391,43 @@ function renderAbGroup() {
       resultEl.textContent = `✕ ${e.message}`;
       resultEl.classList.add("error");
     }
+  });
+}
+
+// ---------- Tracking Enhancer ----------
+
+function renderTrackingEnhancer() {
+  const el = document.getElementById("trackingEnhancerCard");
+  if (!el) return;
+  const te = state.trackingEnhancer;
+
+  el.innerHTML = `
+    <label class="switch">
+      <input type="checkbox" id="teEnabled" ${te.enabled ? "checked" : ""}>
+      <span class="track"></span>
+      Sichtbarkeits-Events senden
+    </label>
+    <p class="hint">Misst per IntersectionObserver, welche Teaser eines Bandes wirklich sichtbar waren
+      (halbe Kachel im Viewport, mindestens 1 Sekunde), und schickt das zusätzlich an
+      <code>tracksrv.zdf.de</code> — per <code>sendBeacon</code>, damit es einen Seitenwechsel überlebt.</p>
+
+    <p class="hint" style="margin-top:1rem;"><strong>Klick im Band:</strong> Kopie des Original-Click-Events
+      (mit clusterId, recoId, recoModel) plus <code>defeatedAssetIds</code> — sichtbar, aber nicht geklickt.<br>
+      <strong>Kein Klick:</strong> eigenes <code>eventType=impression</code> beim Verlassen der Seite,
+      alle sichtbaren Teaser gelten dann als defeated.</p>
+
+    <p class="hint" style="margin-top:1rem;">Jedes Event trägt <code>trackingEnhancer=zdf-toolkit</code>,
+      damit es serverseitig von echtem Traffic trennbar ist. In der Browser-Konsole steht zu jedem Beacon
+      eine Tabelle mit Position, Titel und Status; <code>__zdfTrackingEnhancer.resolve("&lt;URL oder ID-Liste&gt;")</code>
+      löst kopierte IDs nachträglich auf.</p>
+
+    <p class="hint" style="margin-top:1rem;color:var(--accent);">Achtung: Die Events gehen an den echten
+      ZDF-Endpunkt, nicht an eine Testumgebung.</p>
+  `;
+
+  el.querySelector("#teEnabled").addEventListener("change", async (e) => {
+    await state.setTrackingEnhancer({ enabled: e.target.checked });
+    renderTrackingEnhancer();
   });
 }
 

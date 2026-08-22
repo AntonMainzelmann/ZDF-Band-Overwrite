@@ -379,6 +379,17 @@ export async function setQuickSearch(patch) {
   await chrome.storage.local.set({ quickSearch });
 }
 
+// Tracking Enhancer (tracking_enhancer.js) — eigener Storage-Key wie Quick Search,
+// schreibt sofort ohne Speichern-Button. Default aus: die Events gehen per
+// sendBeacon an den echten tracksrv.zdf.de-Endpunkt, das darf nur bewusst laufen.
+export const DEFAULT_TRACKING_ENHANCER = { enabled: false };
+export let trackingEnhancer = { ...DEFAULT_TRACKING_ENHANCER };
+
+export async function setTrackingEnhancer(patch) {
+  trackingEnhancer = { ...trackingEnhancer, ...patch };
+  await chrome.storage.local.set({ trackingEnhancer });
+}
+
 const uid = () => crypto.randomUUID();
 
 export const AB_GROUPS_SOURCE_URL = "https://abgroup.zdf.de/test.json";
@@ -397,7 +408,7 @@ export async function fetchAbGroups() {
 export async function loadState() {
   const stored = await chrome.storage.local.get([
     "sagemakerEndpoints", "historyPresets", "configs", "jsonTemplates", "pageTypes",
-    "abGroups", "abGroupMeta", "quickSearch",
+    "abGroups", "abGroupMeta", "quickSearch", "trackingEnhancer",
     "endpoints", "combos", // Zwischenschema (Vorgänger-Iteration)
     "bandConfigs", "nextVideoConfig" // ursprüngliches flaches Schema
   ]);
@@ -405,6 +416,7 @@ export async function loadState() {
   abGroups = stored.abGroups || [];
   abGroupMeta = stored.abGroupMeta || { name: "", expirationDate: "" };
   quickSearch = { ...DEFAULT_QUICK_SEARCH, ...(stored.quickSearch || {}) };
+  trackingEnhancer = { ...DEFAULT_TRACKING_ENHANCER, ...(stored.trackingEnhancer || {}) };
 
   // Nur bei komplett fehlendem Key vorbelegen — ein leeres Array bedeutet,
   // der User hat alle Einträge bewusst gelöscht, das bleibt so.

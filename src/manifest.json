@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ZDF Toolkit (Debug)",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Ersetzt ein ZDF-Teaser-Band mit hart-codierten Debug-Items.",
   "icons": {
     "16": "icons/m1-16.png",
