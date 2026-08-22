@@ -261,15 +261,27 @@
   const SEARCH_RECO_PERSISTED_HASH = "efed72c8e5b40fd0315a7729a62c6b6931c53ed257fb1860de36950c9ab65be9";
 
   function mapSearchItem(item) {
-    // Karten im Overlay sind ~160px breit — dim276X155 (16:9, kleinste verfügbare
-    // Layout-Variante) reicht auch auf Retina, dim380X170 wäre für die Kartengröße
-    // unnötig groß und bremst beim gleichzeitigen Laden vieler Kacheln.
-    const layouts = item.teaser?.imageWithoutLogo?.layouts || item.teaser?.image?.layouts;
     return {
       title: item.title,
       href: item.sharingUrl,
-      image: layouts?.dim276X155 || layouts?.dim380X170 || null
+      layouts: item.teaser?.imageWithoutLogo?.layouts || item.teaser?.image?.layouts
     };
+  }
+
+  // Kartengrid im Overlay ist minmax(210px,1fr) mit auto-fit — bei wenigen
+  // Items pro Sektion strecken sich die Karten über die volle Breite (siehe
+  // renderResults in quick_search.js), bei vielen bleiben sie ~210px. Bild
+  // erst hier auflösen, wenn die tatsächliche Item-Zahl der Sektion bekannt
+  // ist, statt pauschal die kleinste Variante zu laden (die wirkt bei
+  // gestreckten Karten sonst verpixelt).
+  function resolveSectionImages(items) {
+    const big = items.length <= 4;
+    return items.map(({ layouts, ...rest }) => ({
+      ...rest,
+      image: (big
+        ? layouts?.dim760X340 || layouts?.dim380X170 || layouts?.dim276X155
+        : layouts?.dim276X155 || layouts?.dim380X170) || null
+    }));
   }
 
   // Voller Query-Text statt Hash, per "Query automatisch finden" in den Quick-Search-
@@ -327,8 +339,8 @@
           { query, mode: "ALL_RESULTS_EXCLUDING_TOP_RESULTS", group, first: allFirst, after: null })
       ]);
       return [
-        { label: "Top-Ergebnisse", items: (top?.searchDocuments?.results || []).map(r => mapSearchItem(r.item)) },
-        { label: "Alle Ergebnisse", items: (all?.searchDocuments?.results || []).map(r => mapSearchItem(r.item)) }
+        { label: "Top-Ergebnisse", items: resolveSectionImages((top?.searchDocuments?.results || []).map(r => mapSearchItem(r.item))) },
+        { label: "Alle Ergebnisse", items: resolveSectionImages((all?.searchDocuments?.results || []).map(r => mapSearchItem(r.item))) }
       ];
     } catch (e) {
       log("Suche fehlgeschlagen:", e.message);
@@ -356,7 +368,7 @@
       });
       const rec = data?.searchRecommendation;
       if (!rec) return null;
-      return { label: rec.clusterLabel || configuration, items: rec.items.map(mapSearchItem) };
+      return { label: rec.clusterLabel || configuration, items: resolveSectionImages(rec.items.map(mapSearchItem)) };
     } catch (e) {
       log("Default-Empfehlungen fehlgeschlagen:", configuration, e.message);
       return null;
@@ -365,7 +377,7 @@
 
   async function getDefaultSections() {
     const sections = await Promise.all([
-      fetchRecommendationSection("search-history", 8),
+      fetchRecommendationSection("search-history", 12),
       fetchRecommendationSection("search-discover", 12)
     ]);
     return sections.filter(Boolean);

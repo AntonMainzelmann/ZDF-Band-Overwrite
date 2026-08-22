@@ -99,12 +99,13 @@
   }
 
   // Teaser-Karte im Stil der ZDF-Suchseite (Bild + Titel als Overlay unten), nur kleiner.
-  // Kategorien-Einträge haben kein Bild -> reine Farbfläche mit Titel.
+  // Kategorien-Einträge haben kein Bild -> reine Farbfläche mit Titel. Größe kommt komplett
+  // von außen (renderResults berechnet sie), hier nur volle Breite/Höhe der Grid-Zelle.
   function buildCard(item, i) {
     const card = document.createElement("a");
     card.href = item.href;
     card.dataset.index = String(i);
-    card.style.cssText = `position:relative;display:block;aspect-ratio:16/9;border-radius:9px;
+    card.style.cssText = `position:relative;display:block;width:100%;height:100%;border-radius:9px;
       overflow:hidden;background:#242424;text-decoration:none;${i === activeIndex ? "outline:2px solid #fff;" : ""}`;
     if (item.image) {
       const img = document.createElement("img");
@@ -125,23 +126,109 @@
     return card;
   }
 
+  const GRID_GAP = 14;   // entspricht CSS .9rem, hier als px für die Layoutrechnung
+  const MIN_CARD_W = 200; // darunter werden keine Karten mehr angezeigt statt weiter zu schrumpfen
+                          // (200 -> beim vollen 1400px-Panel genau 6 Spalten, also 12 Teaser in 2 Zeilen)
+  const MAX_CARD_W = 340; // darüber wirkt eine einzelne Karte wie ein Hero-Banner statt Teaser
+
+  // Feste Panelhöhe (siehe openOverlay), also passt sich hier die Kartengröße dem Platz an,
+  // nicht das Panel der Ergebniszahl. Karten skalieren zwischen MIN_CARD_W und MAX_CARD_W,
+  // um Breite UND Höhe zu füllen; passen bei MIN_CARD_W nicht alle Items rein, werden die
+  // überzähligen weggelassen (kein Scrollen, kein Schrumpfen darunter). Reines CSS (auto-fit/
+  // minmax) kann das nicht: das kennt nur die Breite, nicht wie viele Zeilen bei fixer Höhe reinpassen.
   function renderResults() {
     resultsEl.innerHTML = "";
-    let i = 0;
-    sections.forEach((section, sIdx) => {
-      if (!section.items.length) return;
+    const visible = sections.filter(s => s.items.length);
+    if (!visible.length) return;
+
+    // Pass 1: nur Überschriften + leere Grids einhängen, um deren tatsächlich belegte
+    // Höhe direkt vom Browser messen zu lassen statt zu schätzen.
+    const headingEls = [];
+    const grids = visible.map((section, sIdx) => {
       if (section.label) {
         const heading = document.createElement("div");
         heading.textContent = section.label;
-        heading.style.cssText = `grid-column:1/-1;font:600 13px/1.3 -apple-system,sans-serif;
+        heading.style.cssText = `font:600 13px/1.3 -apple-system,sans-serif;
           color:#9a9a9a;text-transform:uppercase;letter-spacing:.04em;margin:${sIdx === 0 ? "0" : ".9rem"} 0 .1rem;`;
         resultsEl.appendChild(heading);
+        headingEls.push(heading);
       }
-      for (const item of section.items) {
-        resultsEl.appendChild(buildCard(item, i));
+      const grid = document.createElement("div");
+      grid.style.cssText = "display:grid;gap:" + GRID_GAP + "px;";
+      resultsEl.appendChild(grid);
+      return grid;
+    });
+
+    const cs = getComputedStyle(resultsEl);
+    const availW = resultsEl.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    // Überschriftenhöhe pro Element aufsummieren (offsetHeight + Margins). NICHT über
+    // resultsEl.scrollHeight messen: scrollHeight ist nie kleiner als clientHeight, die
+    // Messung lieferte also die volle Panelhöhe und availH wurde negativ -> es blieb
+    // genau eine Zeile für genau eine Sektion übrig, alle weiteren Sektionen verschwanden.
+    const headingsHeight = headingEls.reduce((sum, el) => {
+      const m = getComputedStyle(el);
+      return sum + el.offsetHeight + parseFloat(m.marginTop) + parseFloat(m.marginBottom);
+    }, 0);
+    const availH = resultsEl.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - headingsHeight;
+    const counts = visible.map(s => s.items.length);
+
+    // Umgekehrte Logik zu vorher: nicht die Kartengröße an "alle Items müssen rein" anpassen,
+    // sondern die Karten frei zwischen MIN und MAX skalieren und überzählige Items schlicht
+    // weglassen. Pro Spaltenzahl c: Kartenbreite = Panelbreite exakt auf c Spalten verteilt
+    // (gekappt bei MAX), daraus folgt, wie viele Zeilen in die feste Höhe passen und damit,
+    // wie viele Items sichtbar wären. Gewählt wird das c, das die meisten Items zeigt —
+    // bei Gleichstand (z.B. nur 2 Treffer, passen immer) das mit der größeren Karte.
+    function planFor(c) {
+      const w = Math.min((availW - (c - 1) * GRID_GAP) / c, MAX_CARD_W);
+      if (w < MIN_CARD_W) return null;
+      const h = w * 9 / 16;
+      const totalRows = Math.max(1, Math.floor((availH + GRID_GAP) / (h + GRID_GAP)));
+      // Zeilen auf die Sektionen verteilen: reihum je eine, bis der Bedarf gedeckt ist
+      // oder keine Zeilen mehr übrig sind (Reihenfolge = Sektionsreihenfolge, d.h.
+      // Top-Ergebnisse bekommen ihre erste Zeile vor "Alle Ergebnisse" die zweite).
+      const need = counts.map(n => Math.ceil(n / c));
+      const rows = counts.map(() => 0);
+      let remaining = totalRows, gave = true;
+      while (remaining > 0 && gave) {
+        gave = false;
+        for (let s = 0; s < rows.length && remaining > 0; s++) {
+          if (rows[s] < need[s]) { rows[s]++; remaining--; gave = true; }
+        }
+      }
+      const shownCounts = counts.map((n, s) => Math.min(n, rows[s] * c));
+      return { c, w, h, shownCounts, shown: shownCounts.reduce((a, b) => a + b, 0) };
+    }
+
+    let best = null;
+    const maxColumns = Math.max(1, Math.floor((availW + GRID_GAP) / (MIN_CARD_W + GRID_GAP)));
+    for (let c = 1; c <= maxColumns; c++) {
+      const plan = planFor(c);
+      if (!plan) break;
+      if (!best || plan.shown > best.shown || (plan.shown === best.shown && plan.w > best.w)) best = plan;
+    }
+    if (!best) best = { c: 1, w: Math.max(availW, 50), h: Math.max(availW, 50) * 9 / 16, shownCounts: counts.map((n, s) => (s === 0 ? Math.min(n, 1) : 0)), shown: 1 };
+
+    // Pass 2: nur die sichtbaren Items in die vorbereiteten Grids füllen; items-Liste für
+    // die Tastaturnavigation auf genau diese beschränken, damit Enter nie ein unsichtbares
+    // Ergebnis öffnet. Sektionen, für die keine Zeile mehr übrig war, verlieren ihr Heading.
+    items = [];
+    let i = 0;
+    grids.forEach((grid, sIdx) => {
+      const shown = best.shownCounts[sIdx];
+      if (!shown) {
+        if (visible[sIdx].label) grid.previousElementSibling?.remove(); // Heading der leer ausgegangenen Sektion
+        grid.remove();
+        return;
+      }
+      grid.style.gridTemplateColumns = `repeat(${best.c}, ${best.w}px)`;
+      grid.style.gridAutoRows = `${best.h}px`;
+      for (const item of visible[sIdx].items.slice(0, shown)) {
+        items.push(item);
+        grid.appendChild(buildCard(item, i));
         i++;
       }
     });
+    if (activeIndex >= items.length) activeIndex = items.length ? 0 : -1;
   }
 
   function setActive(i) {
@@ -195,14 +282,13 @@
     overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2147483647;
       display:flex;justify-content:center;padding-top:10vh;font-family:-apple-system,sans-serif;`;
     overlay.innerHTML = `
-      <div id="zdf-qs-panel" style="width:min(92vw,940px);max-height:78vh;background:rgba(28,28,28,.97);
+      <div id="zdf-qs-panel" style="width:min(92vw,1400px);height:85vh;background:rgba(28,28,28,.2);
         backdrop-filter:blur(12px);border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,.5);
         display:flex;flex-direction:column;overflow:hidden;">
         <input id="zdf-qs-input" type="text" placeholder="ZDF durchsuchen…" autocomplete="off"
-          style="border:none;outline:none;background:transparent;color:#fff;font-size:24px;
+          style="border:none;outline:none;background:transparent;color:#fff;font-size:24px;flex:none;
           padding:1.1rem 1.4rem;border-bottom:1px solid rgba(255,255,255,.1);" />
-        <div id="zdf-qs-results" style="overflow-y:auto;padding:1rem 1.2rem 1.2rem;display:grid;
-          grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.7rem;"></div>
+        <div id="zdf-qs-results" style="flex:1;min-height:0;overflow-y:auto;padding:1rem 1.2rem 1.2rem;"></div>
       </div>
     `;
     document.body.appendChild(overlay);
