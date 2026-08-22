@@ -7,7 +7,7 @@ import { watch } from "node:fs";
 
 const SRC = "src";
 const DIST = "dist";
-const STATIC_FILES = ["manifest.json", "background.js", "main.js", "zdf_api.js", "quick_search.js", "nextvideo_interceptor.js", "options.html", "popup.html", "popup.js"];
+const STATIC_FILES = ["manifest.json", "background.js", "main.js", "zdf_api.js", "quick_search.js", "nextvideo_interceptor.js", "tracking_enhancer.js", "options.html", "popup.html", "popup.js"];
 const STATIC_DIRS = ["icons"];
 
 async function copyStatic() {

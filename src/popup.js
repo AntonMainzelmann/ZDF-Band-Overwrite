@@ -68,6 +68,23 @@ async function renderQuickSearchToggle() {
   });
 }
 
+// ---------- Tracking Enhancer: schickt zusätzliche Sichtbarkeits-Events an
+// tracksrv.zdf.de (siehe tracking_enhancer.js). Default aus — die Events gehen
+// an den echten ZDF-Endpunkt, das soll niemand versehentlich anlassen. ----------
+
+async function renderTrackingEnhancerToggle() {
+  const list = document.getElementById("trackingEnhancerToggleList");
+  const { trackingEnhancer = {} } = await chrome.storage.local.get("trackingEnhancer");
+
+  list.innerHTML = toggleRowHtml("trackingEnhancer", "Sichtbarkeits-Events", trackingEnhancer.enabled === true);
+
+  list.querySelector(".toggleRow").addEventListener("click", async () => {
+    const { trackingEnhancer: current = {} } = await chrome.storage.local.get("trackingEnhancer");
+    await chrome.storage.local.set({ trackingEnhancer: { ...current, enabled: current.enabled !== true } });
+    renderTrackingEnhancerToggle();
+  });
+}
+
 // ---------- A/B-Gruppe: direktes Setzen im localStorage der Zielseite (kein
 // An/Aus-Override — Auswahl schreibt sofort und lädt die Seite neu) ----------
 
@@ -147,5 +164,6 @@ document.getElementById("openOptions").addEventListener("click", () => chrome.ru
 
 renderBandToggles();
 renderQuickSearchToggle();
+renderTrackingEnhancerToggle();
 renderAbGroup();
 renderTemplates();

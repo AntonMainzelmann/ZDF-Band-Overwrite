@@ -60,7 +60,8 @@
         "https://www.zdf.de/*"
       ],
       "js": [
-        "nextvideo_interceptor.js"
+        "nextvideo_interceptor.js",
+        "tracking_enhancer.js"
       ],
       "world": "MAIN",
       "run_at": "document_start"

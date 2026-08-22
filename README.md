@@ -50,6 +50,7 @@ dist/       Build-Ausgabe — nicht eingecheckt, per npm run build erzeugen
 
 ## Changelog
 
+- Tracking Enhancer hinzugefügt (misst per IntersectionObserver, welche Teaser wirklich sichtbar waren, und schickt `defeatedAssetIds` als sendBeacon an tracksrv.zdf.de — Popup-Toggle, Default aus)
 - DKDI-Band-Overwrite hinzugefügt ("Das könnte Dich interessieren")
 - Next-Video-Overwrite hinzugefügt
 - A/B-Gruppen-Setter hinzugefügt

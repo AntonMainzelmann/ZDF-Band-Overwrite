@@ -257,6 +257,20 @@
     window.postMessage({ source: "zdf-nv-bridge", type: "response", id: msg.id, result }, "*");
   });
 
+  // Tracking Enhancer: läuft im MAIN world (tracking_enhancer.js) und kommt dort
+  // nicht an chrome.storage — Zustand also von hier aus reinreichen.
+  function pushTrackingEnhancer(enabled) {
+    window.postMessage({ source: "zdf-te-bridge", enabled }, "*");
+  }
+  chrome.storage.local.get("trackingEnhancer").then(({ trackingEnhancer }) => {
+    pushTrackingEnhancer(trackingEnhancer?.enabled === true);
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes.trackingEnhancer) {
+      pushTrackingEnhancer(changes.trackingEnhancer.newValue?.enabled === true);
+    }
+  });
+
   // Warten bis die konfigurierten Bänder im DOM sind.
   async function start() {
     const { bandActive = {}, bandConfigs = [], nextVideoConfig: nvConfig } =
