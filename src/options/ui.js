@@ -10,6 +10,7 @@ export function renderAll() {
   renderJsonTemplates();
   renderQueryReference();
   renderAbGroup();
+  renderQuickSearch();
 }
 
 // ---------- Start: Band-Konfigurationen ----------
@@ -389,6 +390,140 @@ function renderAbGroup() {
       resultEl.textContent = `✕ ${e.message}`;
       resultEl.classList.add("error");
     }
+  });
+}
+
+// ---------- Quick Search ----------
+
+const SHORTCUT_KEY_LABELS = { Space: "Leertaste", Enter: "Eingabe", Escape: "Esc", Tab: "Tab" };
+
+function describeShortcutCode(code) {
+  if (SHORTCUT_KEY_LABELS[code]) return SHORTCUT_KEY_LABELS[code];
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  if (code.startsWith("Arrow")) return `Pfeil ${code.slice(5)}`;
+  return code;
+}
+
+function describeShortcut(sc) {
+  const parts = [];
+  if (sc.ctrlKey) parts.push("Strg");
+  if (sc.altKey) parts.push("Alt");
+  if (sc.shiftKey) parts.push("Shift");
+  if (sc.metaKey) parts.push("⌘");
+  parts.push(describeShortcutCode(sc.code));
+  return parts.join(" + ");
+}
+
+let recordingShortcut = false;
+
+function queriesStatusHtml(queries) {
+  return `getSearchResults: ${queries.getSearchResults ? "✓ eigener Query-Text" : "eingebauter Hash"}<br>`
+    + `SearchRecommendation: ${queries.SearchRecommendation ? "✓ eigener Query-Text" : "eingebauter Hash"}`;
+}
+
+function renderQuickSearch() {
+  const el = document.getElementById("quickSearchCard");
+  if (!el) return;
+  const qs = state.quickSearch;
+
+  el.innerHTML = `
+    <label class="switch">
+      <input type="checkbox" id="qsEnabled" ${qs.enabled ? "checked" : ""}>
+      <span class="track"></span>
+      Quick Search aktiv
+    </label>
+    <p class="hint">Overlay per Tastenkombination oder Klick auf das Such-Icon statt der ZDF-Suchseite.</p>
+
+    <label class="switch" style="margin-top:1rem;">
+      <input type="checkbox" id="qsInterceptClick" ${qs.interceptSearchClick ? "checked" : ""} ${qs.enabled ? "" : "disabled"}>
+      <span class="track"></span>
+      Klick auf Such-Icon abfangen
+    </label>
+    <p class="hint">Aus: Klick auf das Lupen-Icon navigiert wieder normal zu /suche — die Tastenkombination öffnet Quick Search trotzdem weiter.</p>
+
+    <div class="field" style="margin-top:1rem;">
+      <label for="qsShortcutBtn">Tastenkombination</label>
+      <button type="button" class="btn" id="qsShortcutBtn" ${qs.enabled ? "" : "disabled"}>${esc(describeShortcut(qs.shortcut))}</button>
+    </div>
+
+    <div class="field" style="margin-top:1rem;">
+      <label>GraphQL-Queries (Suche)</label>
+      <p class="hint" id="qsQueriesStatus" style="margin:0 0 .5rem;">${queriesStatusHtml(qs.queries)}</p>
+      <p class="hint">Bricht der eingebaute Persisted-Query-Hash nach einem ZDF-Deploy (leere Suchergebnisse), hier den vollen
+        Query-Text live aus ZDFs eigenem Bundle ziehen — braucht einen offenen zdf.de-Tab, funktioniert danach unabhängig vom Hash weiter.</p>
+      <div class="testRow">
+        <button type="button" class="btn small" id="qsFindQueries">Query automatisch finden</button>
+        <button type="button" class="btn ghost small" id="qsResetQueries"
+          style="${(qs.queries.getSearchResults || qs.queries.SearchRecommendation) ? "" : "display:none;"}">Zurücksetzen</button>
+        <span class="testResult" id="qsFindQueriesResult"></span>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("qsEnabled").addEventListener("change", async (e) => {
+    await state.setQuickSearch({ enabled: e.target.checked });
+    renderQuickSearch();
+  });
+  document.getElementById("qsInterceptClick").addEventListener("change", async (e) => {
+    await state.setQuickSearch({ interceptSearchClick: e.target.checked });
+  });
+
+  const shortcutBtn = document.getElementById("qsShortcutBtn");
+  shortcutBtn.addEventListener("click", () => {
+    if (recordingShortcut) return;
+    recordingShortcut = true;
+    shortcutBtn.textContent = "Kombination drücken … (Esc = abbrechen)";
+
+    const onKey = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") { cleanup(); renderQuickSearch(); return; }
+      if (["Control", "Alt", "Shift", "Meta"].includes(e.key)) return; // erst auf echte Taste warten
+      const shortcut = { ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, metaKey: e.metaKey, code: e.code };
+      cleanup();
+      await state.setQuickSearch({ shortcut });
+      renderQuickSearch();
+    };
+    function cleanup() { recordingShortcut = false; document.removeEventListener("keydown", onKey, true); }
+    document.addEventListener("keydown", onKey, true);
+  });
+
+  document.getElementById("qsFindQueries").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const resultEl = document.getElementById("qsFindQueriesResult");
+    btn.disabled = true;
+    resultEl.classList.remove("error", "ok");
+    resultEl.textContent = "Suche im zdf.de-Bundle …";
+    try {
+      const res = await chrome.runtime.sendMessage({ action: "findQuickSearchQueries" });
+      if (res?.error) throw new Error(res.error);
+
+      const newQueries = { ...state.quickSearch.queries };
+      const ok = [], failed = [];
+      for (const [name, r] of Object.entries(res)) {
+        if (r.ok) { newQueries[name] = r.query; ok.push(name); } else failed.push(`${name}: ${r.error}`);
+      }
+      await state.setQuickSearch({ queries: newQueries });
+
+      resultEl.textContent = failed.length
+        ? `${ok.length ? `✓ ${ok.join(", ")} aktualisiert` : "✕ nichts gefunden"} — ${failed.join("; ")}`
+        : `✓ ${ok.join(", ")} aktualisiert`;
+      resultEl.classList.add(ok.length ? "ok" : "error");
+      document.getElementById("qsQueriesStatus").innerHTML = queriesStatusHtml(state.quickSearch.queries);
+      document.getElementById("qsResetQueries").style.display =
+        (state.quickSearch.queries.getSearchResults || state.quickSearch.queries.SearchRecommendation) ? "" : "none";
+    } catch (err) {
+      resultEl.textContent = `✕ ${err.message}`;
+      resultEl.classList.add("error");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById("qsResetQueries").addEventListener("click", async () => {
+    await state.setQuickSearch({ queries: {} });
+    renderQuickSearch();
   });
 }
 

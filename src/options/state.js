@@ -357,6 +357,25 @@ export let pageTypes = [];
 export let abGroups = [];
 export let abGroupMeta = { name: "", expirationDate: "" };
 
+// Quick Search (main.js/quick_search.js) — eigener Storage-Key, unabhängig vom
+// Band-Overwrite-Schema. Schreibt sofort bei jeder Änderung (kein Speichern-Button),
+// quick_search.js reagiert live per chrome.storage.onChanged.
+export const DEFAULT_QUICK_SEARCH = {
+  enabled: true,
+  interceptSearchClick: true,
+  shortcut: { ctrlKey: true, altKey: false, shiftKey: false, metaKey: false, code: "Space" },
+  // { getSearchResults?: string, SearchRecommendation?: string } — voller Query-Text statt
+  // Persisted-Query-Hash, per "Query automatisch finden" aus ZDFs Bundle gezogen (siehe
+  // background.js findSearchQueriesInPage). Leer = zdf_api.js nutzt die eingebauten Hashes.
+  queries: {}
+};
+export let quickSearch = { ...DEFAULT_QUICK_SEARCH };
+
+export async function setQuickSearch(patch) {
+  quickSearch = { ...quickSearch, ...patch };
+  await chrome.storage.local.set({ quickSearch });
+}
+
 const uid = () => crypto.randomUUID();
 
 export const AB_GROUPS_SOURCE_URL = "https://abgroup.zdf.de/test.json";
@@ -375,13 +394,14 @@ export async function fetchAbGroups() {
 export async function loadState() {
   const stored = await chrome.storage.local.get([
     "sagemakerEndpoints", "historyPresets", "configs", "jsonTemplates", "pageTypes",
-    "abGroups", "abGroupMeta",
+    "abGroups", "abGroupMeta", "quickSearch",
     "endpoints", "combos", // Zwischenschema (Vorgänger-Iteration)
     "bandConfigs", "nextVideoConfig" // ursprüngliches flaches Schema
   ]);
 
   abGroups = stored.abGroups || [];
   abGroupMeta = stored.abGroupMeta || { name: "", expirationDate: "" };
+  quickSearch = { ...DEFAULT_QUICK_SEARCH, ...(stored.quickSearch || {}) };
 
   // Nur bei komplett fehlendem Key vorbelegen — ein leeres Array bedeutet,
   // der User hat alle Einträge bewusst gelöscht, das bleibt so.

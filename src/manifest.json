@@ -50,7 +50,8 @@
       ],
       "js": [
         "zdf_api.js",
-        "main.js"
+        "main.js",
+        "quick_search.js"
       ],
       "run_at": "document_idle"
     },

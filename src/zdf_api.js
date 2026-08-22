@@ -52,6 +52,20 @@
     return cachedToken;
   }
 
+  const FALLBACK_AB_GROUP = "gruppe-e";
+  let cachedAbGroupPromise = null;
+
+  // Liest die tatsächlich gesetzte A/B-Testgruppe statt sie hart zu codieren
+  // (siehe background.js readAbGroupInPage — dieselbe Quelle wie Popup/Options).
+  async function getAbGroup() {
+    if (!cachedAbGroupPromise) {
+      cachedAbGroupPromise = chrome.runtime.sendMessage({ action: "getAbGroup" })
+        .then(res => res?.group || FALLBACK_AB_GROUP)
+        .catch(() => FALLBACK_AB_GROUP);
+    }
+    return cachedAbGroupPromise;
+  }
+
   // Lädt die Empfehlungs-IDs vom konfigurierten SageMaker-Endpunkt. Fetch läuft
   // über background.js, da die Content-Script-Seite (CSP der Zielseite) fremde
   // Hosts blockieren kann. Ohne Endpunkt: keine Items (state.js filtert Configs
@@ -240,10 +254,105 @@
     }
   }
 
+  // Persisted Queries der offiziellen ZDF-Suche (siehe /suche). Nur der Hash wird
+  // gesendet, der volle Query-Text liegt server-seitig bereits vor (APQ) — bricht,
+  // falls ZDF den Query-Text seines Frontends ändert und damit den Hash rotiert.
+  const SEARCH_PERSISTED_HASH = "77f956f3dc8e9251075e16455d9bfdf24f68d035238497e4a75edea10b013322";
+  const SEARCH_RECO_PERSISTED_HASH = "efed72c8e5b40fd0315a7729a62c6b6931c53ed257fb1860de36950c9ab65be9";
+
+  function mapSearchItem(item) {
+    return {
+      title: item.title,
+      href: item.sharingUrl,
+      image: item.teaser?.imageWithoutLogo?.layouts?.dim380X170
+        || item.teaser?.image?.layouts?.dim380X170 || null
+    };
+  }
+
+  // Voller Query-Text statt Hash, per "Query automatisch finden" in den Quick-Search-
+  // Einstellungen aus ZDFs Bundle gezogen (background.js findSearchQueriesInPage) —
+  // überlebt eine Hash-Rotation, da kein Persisted-Query-Cache-Treffer nötig ist.
+  async function getStoredQuery(operationName) {
+    const { quickSearch } = await chrome.storage.local.get("quickSearch");
+    return quickSearch?.queries?.[operationName] || null;
+  }
+
+  // content-type-Header wird nur gebraucht, damit Apollos CSRF-Check den
+  // GET-Request akzeptiert (sonst 400 "potential CSRF").
+  async function fetchPersistedQuery(operationName, hash, variables) {
+    const token = getCachedToken();
+    if (!token) return null;
+
+    const storedQuery = await getStoredQuery(operationName);
+    let res;
+    if (storedQuery) {
+      res = await fetch("https://api.zdf.de/graphql", {
+        method: "POST",
+        headers: { "api-auth": `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ query: storedQuery, variables })
+      });
+    } else {
+      const extensions = { persistedQuery: { version: 1, sha256Hash: hash } };
+      const url = `https://api.zdf.de/graphql?operationName=${operationName}`
+        + `&variables=${encodeURIComponent(JSON.stringify(variables))}`
+        + `&extensions=${encodeURIComponent(JSON.stringify(extensions))}`;
+      res = await fetch(url, {
+        headers: { "api-auth": `Bearer ${token}`, "accept": "application/json", "content-type": "application/json" }
+      });
+    }
+
+    const json = await res.json();
+    if (!res.ok || json.errors) {
+      log(`${operationName} fehlgeschlagen:`, json.errors || res.status);
+      return null;
+    }
+    return json.data;
+  }
+
+  async function searchVideos(query, { first = 8 } = {}) {
+    if (!query) return [];
+    try {
+      const group = await getAbGroup();
+      const data = await fetchPersistedQuery("getSearchResults", SEARCH_PERSISTED_HASH,
+        { query, mode: "ALL_RESULTS_EXCLUDING_TOP_RESULTS", group, first, after: null });
+      const results = data?.searchDocuments?.results || [];
+      return results.map(r => mapSearchItem(r.item));
+    } catch (e) {
+      log("Suche fehlgeschlagen:", e.message);
+      return [];
+    }
+  }
+
+  // Die "Meistgefunden"-Kachelreihe, die /suche vor jeder Eingabe zeigt. Auch ohne
+  // echte Wiedergabe-Historie liefert der Endpunkt ein generisches Trending-Ranking
+  // (getestet: leere plays/views -> trotzdem volle, sinnvolle Ergebnisse).
+  async function getDefaultResults({ first = 8 } = {}) {
+    try {
+      const abGroup = await getAbGroup();
+      const data = await fetchPersistedQuery("SearchRecommendation", SEARCH_RECO_PERSISTED_HASH, {
+        configuration: "search-history",
+        searchResultsHistory: [],
+        input: {
+          appId: "zdf-web-21f7c74d",
+          filters: { contentOwner: [], fsk: [], language: [] },
+          pagination: { first, after: null },
+          usage: { history: { plays: [], views: [] } },
+          user: { abGroup, userSegment: "segment_6" }
+        }
+      });
+      return (data?.searchRecommendation?.items || []).map(mapSearchItem);
+    } catch (e) {
+      log("Default-Empfehlungen fehlgeschlagen:", e.message);
+      return [];
+    }
+  }
+
   // Exportiere das API-Modul auf das globale window-Objekt für main.js
   window.zdfApi = {
     fetchDebugItems,
-    fetchNextVideoOverride
+    fetchNextVideoOverride,
+    searchVideos,
+    getDefaultResults
   };
 
 })();

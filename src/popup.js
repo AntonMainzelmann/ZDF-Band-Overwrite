@@ -52,6 +52,22 @@ async function renderBandToggles() {
   });
 }
 
+// ---------- Quick Search: eigener Storage-Key, quick_search.js reagiert live per storage.onChanged ----------
+
+async function renderQuickSearchToggle() {
+  const list = document.getElementById("quickSearchToggleList");
+  const { quickSearch = {} } = await chrome.storage.local.get("quickSearch");
+  const enabled = quickSearch.enabled !== false;
+
+  list.innerHTML = toggleRowHtml("quickSearch", "Quick Search", enabled);
+
+  list.querySelector(".toggleRow").addEventListener("click", async () => {
+    const { quickSearch: current = {} } = await chrome.storage.local.get("quickSearch");
+    await chrome.storage.local.set({ quickSearch: { ...current, enabled: !(current.enabled !== false) } });
+    renderQuickSearchToggle();
+  });
+}
+
 // ---------- A/B-Gruppe: direktes Setzen im localStorage der Zielseite (kein
 // An/Aus-Override — Auswahl schreibt sofort und lädt die Seite neu) ----------
 
@@ -130,5 +146,6 @@ async function renderTemplates() {
 document.getElementById("openOptions").addEventListener("click", () => chrome.runtime.openOptionsPage());
 
 renderBandToggles();
+renderQuickSearchToggle();
 renderAbGroup();
 renderTemplates();

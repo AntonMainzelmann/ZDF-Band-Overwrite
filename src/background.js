@@ -96,7 +96,10 @@ function writeAbGroupInPage(group, meta) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action !== "getAbGroup") return;
   (async () => {
-    const [result] = await chrome.scripting.executeScript({ target: { tabId: message.tabId }, func: readAbGroupInPage }).catch(() => [null]);
+    // Popup hat keinen eigenen Tab-Kontext und schickt tabId explizit mit;
+    // ein Content-Script (z.B. zdf_api.js) läuft schon im Ziel-Tab, dafür reicht sender.tab.
+    const tabId = message.tabId ?? sender.tab?.id;
+    const [result] = await chrome.scripting.executeScript({ target: { tabId }, func: readAbGroupInPage }).catch(() => [null]);
     sendResponse({ group: result?.result ?? null });
   })();
   return true;
@@ -327,4 +330,220 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (message.action !== "pageNavigated" || !sender.tab?.id) return;
   detectPageType(sender.tab.id).catch(() => {});
+});
+
+// ---------- Quick Search: Persisted-Query-Hashes können bei einem ZDF-Deploy
+// rotieren (siehe zdf_api.js). "Query automatisch finden" holt sich statt eines
+// Hashes gleich den vollen Query-Text aus ZDFs eigenem JS-Bundle (dort als
+// bereits geparste GraphQL-AST eingebettet) und druckt ihn wieder zu Text —
+// danach läuft die Suche wie main.js' videosByIds-Query mit vollem Query-Text
+// statt Persisted-Query-Hash, ist also gegen Hash-Rotation immun.
+// Läuft komplett im Seitenkontext (executeScript): Bundle-Fetches sind
+// same-origin, brauchen keinen Umweg über den Service Worker.
+function findSearchQueriesInPage() {
+  const OPERATIONS = {
+    getSearchResults: { query: "tatort", mode: "ALL_RESULTS_EXCLUDING_TOP_RESULTS", group: "gruppe-e", first: 3, after: null },
+    SearchRecommendation: {
+      configuration: "search-history", searchResultsHistory: [],
+      input: {
+        appId: "zdf-web-21f7c74d", filters: { contentOwner: [], fsk: [], language: [] },
+        pagination: { first: 4, after: null }, usage: { history: { plays: [], views: [] } },
+        user: { abGroup: "gruppe-e", userSegment: "segment_6" }
+      }
+    }
+  };
+
+  function extractBalanced(src, startBraceIdx) {
+    let depth = 0, i = startBraceIdx;
+    for (; i < src.length; i++) {
+      const c = src[i];
+      if (c === '"') { i++; while (i < src.length && src[i] !== '"') { if (src[i] === "\\") i++; i++; } continue; }
+      if (c === "{") depth++;
+      else if (c === "}") { depth--; if (depth === 0) return src.slice(startBraceIdx, i + 1); }
+    }
+    return null;
+  }
+
+  function printDocument(ast) {
+    const fragmentsByName = {};
+    ast.definitions.forEach(d => { if (d.kind === "FragmentDefinition") fragmentsByName[d.name.value] = d; });
+    const emptyFrags = new Set();
+    const hasClient = (n) => (n.directives || []).some(d => d.name.value === "client");
+    const join = (arr, sep = "") => (arr || []).filter(Boolean).join(sep);
+    const wrap = (start, str, end = "") => (str ? start + str + end : "");
+    const indent = (str) => (str ? "  " + str.replace(/\n/g, "\n  ") : str);
+
+    function selKept(n) {
+      if (hasClient(n)) return false;
+      if (n.kind === "FragmentSpread" && emptyFrags.has(n.name.value)) return false;
+      return true;
+    }
+    // Apollo Client injiziert vor jedem Request automatisch __typename in
+    // jedes Selection-Set (addTypenameToDocument) — ohne das kann der Server
+    // Union-/Interface-Felder (z.B. SearchDocument.item) nicht auflösen.
+    function block(arr) {
+      const kept = (arr || []).filter(selKept);
+      if (!kept.length) return "";
+      const hasTypename = kept.some(n => n.kind === "Field" && n.name.value === "__typename");
+      const body = hasTypename ? kept.map(print) : ["__typename", ...kept.map(print)];
+      return "{\n" + indent(join(body, "\n")) + "\n}";
+    }
+    const printDirectives = (ds) => wrap(" ", join((ds || []).filter(d => d.name.value !== "client").map(print), " "));
+    function printType(t) {
+      if (t.kind === "NonNullType") return printType(t.type) + "!";
+      if (t.kind === "ListType") return "[" + printType(t.type) + "]";
+      return t.name.value;
+    }
+    function printValue(v) {
+      switch (v.kind) {
+        case "Variable": return "$" + v.name.value;
+        case "IntValue": case "FloatValue": return v.value;
+        case "StringValue": return JSON.stringify(v.value);
+        case "BooleanValue": return String(v.value);
+        case "NullValue": return "null";
+        case "EnumValue": return v.value;
+        case "ListValue": return "[" + join(v.values.map(printValue), ", ") + "]";
+        case "ObjectValue": return "{" + join(v.fields.map(f => f.name.value + ": " + printValue(f.value)), ", ") + "}";
+        default: return "";
+      }
+    }
+    function print(n) {
+      switch (n.kind) {
+        case "Document": {
+          const defs = n.definitions.filter(d => !(d.kind === "FragmentDefinition" && emptyFrags.has(d.name.value)));
+          return join(defs.map(print), "\n\n") + "\n";
+        }
+        case "OperationDefinition": {
+          const varDefs = wrap("(", join(n.variableDefinitions.map(print), ", "), ")");
+          const prefix = join([n.operation, join([n.name && n.name.value, varDefs])], " ") + printDirectives(n.directives);
+          return prefix + " " + print(n.selectionSet);
+        }
+        case "VariableDefinition":
+          return "$" + n.variable.name.value + ": " + printType(n.type) + (n.defaultValue ? " = " + printValue(n.defaultValue) : "");
+        case "SelectionSet": return block(n.selections);
+        case "Field": {
+          const args = wrap("(", join((n.arguments || []).map(print), ", "), ")");
+          const alias = n.alias ? n.alias.value + ": " : "";
+          return alias + n.name.value + args + printDirectives(n.directives) + wrap(" ", n.selectionSet && print(n.selectionSet));
+        }
+        case "Argument": return n.name.value + ": " + printValue(n.value);
+        case "FragmentSpread": return "..." + n.name.value + printDirectives(n.directives);
+        case "InlineFragment": {
+          const cond = n.typeCondition ? " on " + n.typeCondition.name.value : "";
+          return "..." + cond + printDirectives(n.directives) + " " + print(n.selectionSet);
+        }
+        case "FragmentDefinition":
+          return "fragment " + n.name.value + " on " + n.typeCondition.name.value + printDirectives(n.directives) + " " + print(n.selectionSet);
+        case "Directive": return "@" + n.name.value + wrap("(", join((n.arguments || []).map(print), ", "), ")");
+        default: return "";
+      }
+    }
+    // Fixpunkt: Fragmente, die (rekursiv) nur @client-Felder oder nur leere
+    // Fragmente enthalten, komplett rausnehmen statt leer zu drucken.
+    for (let pass = 0; pass < 10; pass++) {
+      let changed = false;
+      for (const name in fragmentsByName) {
+        if (emptyFrags.has(name)) continue;
+        if (fragmentsByName[name].selectionSet.selections.filter(selKept).length === 0) { emptyFrags.add(name); changed = true; }
+      }
+      if (!changed) break;
+    }
+    return print(ast);
+  }
+
+  // ZDFs Bundle serialisiert die AST als JS-Objektliteral mit unquoted Keys
+  // (kind:"Document", nicht "kind":"Document") — kein gültiges JSON. new
+  // Function()/eval ist per MV3-Extension-CSP blockiert, daher Keys außerhalb
+  // von String-Literalen selbst quoten (Strings vorher maskieren, damit
+  // Doppelpunkte/Klammern in echten Textwerten nicht mit-ersetzt werden).
+  function jsObjectLiteralToJson(src) {
+    const strings = [];
+    const masked = src.replace(/"(?:[^"\\]|\\.)*"/g, (m) => { strings.push(m); return ` ${strings.length - 1} `; });
+    const withQuotedKeys = masked.replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":');
+    return withQuotedKeys.replace(/ (\d+) /g, (_, i) => strings[Number(i)]);
+  }
+
+  function findDocFor(bundleText, opName) {
+    const nameIdx = bundleText.indexOf(`name:{kind:"Name",value:"${opName}"}`);
+    if (nameIdx === -1) return null;
+    const docStart = bundleText.lastIndexOf('{kind:"Document"', nameIdx);
+    if (docStart === -1) return null;
+    const src = extractBalanced(bundleText, docStart);
+    if (!src) return null;
+    try { return JSON.parse(jsObjectLiteralToJson(src)); } catch { return null; }
+  }
+
+  function getToken() {
+    const scripts = [...document.querySelectorAll("script")];
+    const tokenScript = scripts.find(s => s.textContent && s.textContent.includes("apiAuthToken"));
+    if (!tokenScript) return null;
+    const text = tokenScript.textContent;
+    const match = text.match(/apiAuthToken\\\":\\\"([^\\"]+)/) || text.match(/apiAuthToken":"([^"]+)"/);
+    return match ? match[1] : null;
+  }
+
+  return (async () => {
+    const token = getToken();
+    if (!token) return { error: "Kein API-Token auf der Seite gefunden." };
+
+    const srcs = [...document.querySelectorAll("script[src]")].map(s => s.src).filter(u => u.includes("/_next/"));
+    const found = {};
+    for (const url of srcs) {
+      if (Object.keys(found).length === Object.keys(OPERATIONS).length) break;
+      let text;
+      try { text = await (await fetch(url)).text(); } catch { continue; }
+      for (const opName of Object.keys(OPERATIONS)) {
+        if (found[opName]) continue;
+        if (!text.includes(`"${opName}"`)) continue;
+        const ast = findDocFor(text, opName);
+        if (ast) found[opName] = printDocument(ast);
+      }
+    }
+
+    const result = {};
+    for (const [opName, variables] of Object.entries(OPERATIONS)) {
+      const queryText = found[opName];
+      if (!queryText) { result[opName] = { ok: false, error: "Nicht im Bundle gefunden." }; continue; }
+      try {
+        const res = await fetch("https://api.zdf.de/graphql", {
+          method: "POST",
+          headers: { "api-auth": `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ query: queryText, variables })
+        });
+        const json = await res.json().catch(() => null);
+        if (res.ok && json && !json.errors) result[opName] = { ok: true, query: queryText };
+        else result[opName] = { ok: false, error: json?.errors?.[0]?.message || `HTTP ${res.status}` };
+      } catch (e) {
+        result[opName] = { ok: false, error: e.message };
+      }
+    }
+    return result;
+  })();
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action !== "findQuickSearchQueries") return;
+  (async () => {
+    // Next.js lädt den Such-Bundle-Chunk nur auf Seiten, die die Suche tatsächlich
+    // mounten (z.B. /suche) — auf der Startseite ist er evtl. gar nicht geladen.
+    // Erst /suche-Tabs probieren, sonst der Reihe nach alle offenen zdf.de-Tabs.
+    const tabs = await chrome.tabs.query({ url: "*://www.zdf.de/*" });
+    tabs.sort((a, b) => (b.url?.includes("/suche") ? 1 : 0) - (a.url?.includes("/suche") ? 1 : 0));
+    if (tabs.length === 0) { sendResponse({ error: "Kein offener zdf.de-Tab gefunden — erst zdf.de öffnen." }); return; }
+
+    const merged = {};
+    for (const tab of tabs) {
+      const [injected] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: findSearchQueriesInPage })
+        .catch(e => [{ result: { error: e.message } }]);
+      const res = injected?.result;
+      if (res?.error) continue; // z.B. kein Token auf dieser Seite -> nächster Tab
+      for (const [name, r] of Object.entries(res || {})) {
+        if (r.ok && !merged[name]?.ok) merged[name] = r;
+        else if (!merged[name]) merged[name] = r;
+      }
+      if (Object.values(merged).every(r => r.ok)) break;
+    }
+    sendResponse(Object.keys(merged).length ? merged : { error: "Auf keinem offenen zdf.de-Tab gefunden — /suche einmal öffnen und erneut versuchen." });
+  })();
+  return true;
 });
