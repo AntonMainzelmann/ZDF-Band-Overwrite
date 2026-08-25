@@ -324,13 +324,134 @@
     return json.data;
   }
 
+  // Kinder-Suche: ZDFs Suche kennt keinen Server-Filter für Kinderinhalte. SearchFilters
+  // hat nur contentOwner/fsk/language (per Fehlermeldungen des Servers ermittelt, echte
+  // Introspektion ist aus), und contentOwner taugt nicht als Ersatz: der Suchindex enthält
+  // auch ARD-Erwachsenencontent (tatort, tagesschau), während Kinderinhalte über ZDF, ARD
+  // und KiKA verteilt sind. Verlässlich ist nur structuralMetadata.isChildrenContent — das
+  // ZDFs eigene Such-Query aber nicht mitholt. Also eigene Query (kein Persisted Hash nötig,
+  // beliebige Querytexte werden akzeptiert), großzügig viele Treffer holen und clientseitig
+  // filtern. Bei generischen Wörtern ist rund die Hälfte der 200 Treffer Kinderinhalt,
+  // der größere first-Wert kostet ~30ms gegenüber first:24.
+  const KIDS_SEARCH_FIRST = 200;
+  // canonical + smartCollection.canonical nur für den ZDFchen-Filter (siehe getZdfchenCatalog).
+  const KIDS_ITEM_FIELDS = `title sharingUrl canonical
+    structuralMetadata { isChildrenContent }
+    teaser {
+      imageWithoutLogo { layouts { dim276X155 dim380X170 dim760X340 } }
+      image { layouts { dim276X155 dim380X170 dim760X340 } }
+    }`;
+  // Video / ISmartCollection (Interface über alle *SmartCollection-Typen) / MetaCollection
+  // sind die drei Item-Typen, die die Suche liefert.
+  const KIDS_SEARCH_QUERY = `
+    query getKidsSearchResults($query: String!, $mode: SearchMode, $first: Int) {
+      searchDocuments(query: $query, mode: $mode, first: $first) {
+        results { item {
+          __typename
+          ... on Video { ${KIDS_ITEM_FIELDS} smartCollection { canonical } }
+          ... on ISmartCollection { ${KIDS_ITEM_FIELDS} }
+          ... on MetaCollection { ${KIDS_ITEM_FIELDS} }
+        } }
+      }
+    }`;
+
+  // ZDFchen (Vorschulbereich, zdf.de/zdfchen) hat in der Suche kein eigenes Merkmal: die
+  // Sendungen liegen unter ganz normalen Pfaden (/animation/…, /serien/…), tragen dieselbe
+  // contentOwner-ID wie der Rest von ZDFtivi und kein Vorschul-Flag — structuralMetadata hat
+  // nur isChildrenContent und genre, metaPlatformBrand kommt in Suchtreffern leer zurück.
+  // Der einzige verlässliche Katalog ist die /zdfchen-Seite selbst, und die ist serverseitig
+  // gerendert: ein Fetch plus Regex über die Sendungs-Links reicht (derzeit 38 Collections).
+  // Einmal pro Tab-Lebensdauer geholt.
+  const AREA_LINK_RE = /"\/(?:animation|serien|filme|shows|magazine|reportagen|dokus|kinder|zdfchen)\/([a-z0-9-]+)"/g;
+  const areaCanonicalsCache = {}; // Pfad -> Promise<string[]>
+  function getAreaCanonicals(path) {
+    if (!areaCanonicalsCache[path]) {
+      areaCanonicalsCache[path] = fetch("https://www.zdf.de" + path)
+        .then(res => res.text())
+        .then(html => [...new Set([...html.matchAll(AREA_LINK_RE)].map(m => m[1]))])
+        .catch(e => {
+          log("Bereichs-Katalog fehlgeschlagen:", path, e.message);
+          delete areaCanonicalsCache[path]; // nächster Versuch darf neu laden
+          return [];
+        });
+    }
+    return areaCanonicalsCache[path];
+  }
+
+  async function getZdfchenCatalog() {
+    return new Set(await getAreaCanonicals("/zdfchen"));
+  }
+
+  // Kachelreihe einer Bereichsseite: die ersten Sendungen ihres Katalogs, in einem Rutsch
+  // über Aliase geholt (~100ms für 24 Collections). Damit hat das Overlay in den
+  // Kinderbereichen auch ohne Eingabe etwas zu zeigen.
+  const AREA_TEASER_COUNT = 24;
+  const AREA_TEASER_FIELDS = `title sharingUrl
+    teaser {
+      imageWithoutLogo { layouts { dim276X155 dim380X170 dim760X340 } }
+      image { layouts { dim276X155 dim380X170 dim760X340 } }
+    }`;
+  const areaTeasersCache = {}; // Pfad -> Promise<items[]>
+  function getAreaTeasers(path) {
+    if (!areaTeasersCache[path]) {
+      areaTeasersCache[path] = (async () => {
+        const token = getCachedToken();
+        const canonicals = (await getAreaCanonicals(path)).slice(0, AREA_TEASER_COUNT);
+        if (!token || !canonicals.length) return [];
+        const aliases = canonicals.map((canonical, i) =>
+          `  t${i}: smartCollectionByCanonical(canonical: ${JSON.stringify(canonical)}) { ${AREA_TEASER_FIELDS} }`);
+        const data = await fetchGraphQL(`query getAreaTeasers {\n${aliases.join("\n")}\n}`, {}, token);
+        // Nicht jeder Link der Seite ist eine SmartCollection (z.B. Meta-Seiten) -> null raus.
+        return resolveSectionImages(Object.values(data || {}).filter(Boolean).map(mapSearchItem));
+      })().catch(e => {
+        log("Bereichs-Kacheln fehlgeschlagen:", path, e.message);
+        delete areaTeasersCache[path];
+        return [];
+      });
+    }
+    return areaTeasersCache[path];
+  }
+  // catalog: null = alle Kinderinhalte, Set von Collection-Canonicals = nur diese Sendungen
+  // (Videos zählen über ihre smartCollection dazu).
+  async function searchKidsVideos(query, topFirst, allFirst, catalog = null) {
+    const token = getCachedToken();
+    if (!token) return [];
+    const inScope = (item) => item?.structuralMetadata?.isChildrenContent
+      && (!catalog || catalog.has(item.smartCollection?.canonical) || catalog.has(item.canonical));
+    const fetchMode = async (mode, want) => {
+      const data = await fetchGraphQL(KIDS_SEARCH_QUERY, { query, mode, first: KIDS_SEARCH_FIRST }, token);
+      const hits = (data?.searchDocuments?.results || [])
+        .map(r => r.item)
+        .filter(inScope)
+        .slice(0, want);
+      return resolveSectionImages(hits.map(mapSearchItem));
+    };
+    const [top, all] = await Promise.all([
+      fetchMode("TOP_RESULTS", topFirst),
+      fetchMode("ALL_RESULTS_EXCLUDING_TOP_RESULTS", allFirst + topFirst)
+    ]);
+    // ALL_RESULTS_EXCLUDING_TOP_RESULTS lässt ZDFs ungefilterte Top-Treffer weg, nicht
+    // unsere kindergefilterten — die tauchen also sonst doppelt auf.
+    const topHrefs = new Set(top.map(i => i.href));
+    return [
+      { label: "Top-Ergebnisse", items: top },
+      { label: "Alle Ergebnisse", items: all.filter(i => !topHrefs.has(i.href)).slice(0, allFirst) }
+    ];
+  }
+
   // /suche zeigt zwei Reihen: "Top-Ergebnisse" (beste Treffer über alle Inhaltstypen)
   // und "Alle Ergebnisse" (breite Liste) — beide über denselben Endpunkt, nur der
   // mode-Parameter unterscheidet sie. Labels kommen bei dieser Query (anders als bei
   // SearchRecommendation) nicht vom Server mit, daher hier fest wie auf /suche benannt.
-  async function searchVideos(query, { topFirst = 6, allFirst = 24 } = {}) {
+  async function searchVideos(query, { topFirst = 6, allFirst = 24, kidsOnly = false, zdfchenOnly = false } = {}) {
     if (!query) return [];
     try {
+      if (zdfchenOnly) {
+        // Katalog leer (Fetch fehlgeschlagen) -> lieber alle Kinderinhalte als gar nichts.
+        const catalog = await getZdfchenCatalog();
+        return await searchKidsVideos(query, topFirst, allFirst, catalog.size ? catalog : null);
+      }
+      if (kidsOnly) return await searchKidsVideos(query, topFirst, allFirst);
       const group = await getAbGroup();
       const [top, all] = await Promise.all([
         fetchPersistedQuery("getSearchResults", SEARCH_PERSISTED_HASH,
@@ -388,7 +509,8 @@
     fetchDebugItems,
     fetchNextVideoOverride,
     searchVideos,
-    getDefaultSections
+    getDefaultSections,
+    getAreaTeasers
   };
 
 })();

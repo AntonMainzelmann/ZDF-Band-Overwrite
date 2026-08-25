@@ -238,11 +238,28 @@
     });
   }
 
+  // Auf zdf.de/kinder sucht das Overlay nur in Kinderinhalten, auf zdf.de/zdfchen nur in
+  // Sendungen des ZDFchen-Vorschulbereichs (siehe searchKidsVideos in zdf_api.js). Pfad erst
+  // beim Suchen lesen, nicht beim Laden: ZDF navigiert als SPA, man kann also ohne Reload in
+  // den Kinderbereich wechseln.
+  const isKidsArea = () => location.pathname.startsWith("/kinder");
+  const isZdfchenArea = () => location.pathname.startsWith("/zdfchen");
+
   async function runSearch(query) {
     const seq = ++requestSeq;
     let newSections;
     if (query.trim()) {
-      newSections = await window.zdfApi.searchVideos(query); // [{label:"Top-Ergebnisse"|"Alle Ergebnisse", items}]
+      // [{label:"Top-Ergebnisse"|"Alle Ergebnisse", items}]
+      newSections = await window.zdfApi.searchVideos(query, { kidsOnly: isKidsArea(), zdfchenOnly: isZdfchenArea() });
+    } else if (isKidsArea() || isZdfchenArea()) {
+      // Ohne Eingabe zeigt das Overlay die jeweils andere Kinderwelt: auf /kinder den
+      // ZDFchen-Vorschulbereich, auf /zdfchen das große ZDFtivi-Angebot. Die eigene
+      // Startseite steht ja schon hinter dem Overlay, und Meistgefunden/Entdecken fallen
+      // aus, weil ZDFs Empfehlungs-Query keinen Kinderfilter kennt.
+      const other = isZdfchenArea()
+        ? { path: "/kinder", label: "ZDFtivi" }
+        : { path: "/zdfchen", label: "ZDFchen — für Kinder bis 6 Jahre" };
+      newSections = [{ label: other.label, items: await window.zdfApi.getAreaTeasers(other.path) }];
     } else if (settings.preloadSearch && cachedDefaultSections) {
       newSections = cachedDefaultSections;
       prefetchDefaultSections(); // im Hintergrund für den nächsten Open auffrischen
@@ -285,7 +302,7 @@
       <div id="zdf-qs-panel" style="width:min(92vw,1400px);height:85vh;background:rgba(28,28,28,.2);
         backdrop-filter:blur(12px);border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,.5);
         display:flex;flex-direction:column;overflow:hidden;">
-        <input id="zdf-qs-input" type="text" placeholder="ZDF durchsuchen…" autocomplete="off"
+        <input id="zdf-qs-input" type="text" placeholder="${isZdfchenArea() ? "ZDFchen durchsuchen…" : isKidsArea() ? "ZDF/Kinder durchsuchen…" : "ZDF durchsuchen…"}" autocomplete="off"
           style="border:none;outline:none;background:transparent;color:#fff;font-size:24px;flex:none;
           padding:1.1rem 1.4rem;border-bottom:1px solid rgba(255,255,255,.1);" />
         <div id="zdf-qs-results" style="flex:1;min-height:0;overflow-y:auto;padding:1rem 1.2rem 1.2rem;"></div>
