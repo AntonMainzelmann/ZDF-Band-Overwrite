@@ -4,11 +4,12 @@ Chrome-Erweiterung (Manifest V3) zum Debuggen von Teaser-Bändern und Empfehlung
 
 ## Funktionen
 
-- **Band-Overwrite** — konfigurierte Bänder (z. B. "Weiterschauen") werden mit Items aus einem SageMaker-Endpunkt überschrieben. Jedes Band hat einen eigenen An/Aus-Toggle im Popup, kein globaler Schalter mehr.
+- **Band-Overwrite** — konfigurierte Bänder (z. B. "Weiterschauen") werden mit Items aus einem SageMaker-Endpunkt überschrieben. Jedes Band hat einen eigenen An/Aus-Toggle im Popup, kein globaler Schalter mehr. Reco-Bänder (per `GetClusterList` geladen) werden direkt in ZDFs Apollo-Client getauscht, React rendert dann echte Kacheln mit Hover-Zoom, Blättern und Tracking ([src/lane_override.js](src/lane_override.js)); andere Bänder fallen auf geklonte DOM-Kacheln zurück.
 - **Next-Video-Override** — überschreibt die "nächstes Video"-Empfehlung im Player, ebenfalls per eigenem Toggle im Popup.
 - **A/B-Gruppe setzen** — schreibt eine gewählte Testgruppe direkt in den `local-user-data`-localStorage-Eintrag von zdf.de und lädt die Seite neu.
 - **GetJson** — feuert konfigurierte GraphQL-Queries gegen `api.zdf.de/graphql` (Token wird aus der Seite extrahiert) und zeigt das Ergebnis als Overlay auf der Seite.
 - **Quick Search** — Spotlight-artiges Overlay statt der ZDF-Suchseite (Klick auf "Suche" oder Ctrl+Space). Live-Ergebnisse über dieselbe GraphQL-Suche wie `/suche`, vor der Eingabe dieselben Bänder (Meistgefunden, Kategorien, Entdecken). Auf `zdf.de/kinder` sucht es ausschließlich in Kinderinhalten, auf `zdf.de/zdfchen` nur im Vorschulkatalog — siehe [Kinder-Suche](#kinder-suche-zdfdekinder) und [ZDFchen-Suche](#zdfchen-suche-zdfdezdfchen).
+- **ID-Auflösung** — `zdf.de/<Video-ID>` leitet auf die Canonical-URL des Videos weiter (`videosByIds` → `sharingUrl`). Schalter unter Optionen → Werkzeuge → ID-Auflösung, Default an.
 - Toolbar-Icon zeigt per grünem Punkt an, ob mindestens ein Band oder Next-Video gerade aktiv überschreibt.
 
 ## Installation (Entwicklung)
@@ -78,7 +79,7 @@ Gefiltert wird clientseitig. Damit trotzdem ein volles Grid zusammenkommt, holt 
 
 ### Details der Umsetzung
 
-- **Erkennung**: `location.pathname.startsWith("/kinder")`, ausgewertet zum Suchzeitpunkt statt beim Laden — zdf.de navigiert als SPA, man kann also ohne Reload in den Kinderbereich wechseln.
+- **Erkennung**: am Dokument, nicht nur am Pfad (`getAreaForPath` in [src/zdf_api.js](src/zdf_api.js)). `/kinder*` und `/zdfchen*` direkt; sonst die Sendung aus dem Pfad ziehen (`/video/<typ>/<sendung>/<folge>` bzw. `/<typ>/<sendung>`), per `smartCollectionByCanonical` auf `isChildrenContent` prüfen und erst bei Kinderinhalt gegen den ZDFchen-Katalog — eine Bibi-&-Tina-Folge unter `/video/animation/…` sucht so im Kinderbereich. Ergebnis pro Sendung gecacht, beim Seitenload und bei SPA-Navigation (`navigation.navigatesuccess`) vorab geholt; Firefox kennt die Navigation API nicht und löst dort erst beim Öffnen auf.
 - **Dedup**: `ALL_RESULTS_EXCLUDING_TOP_RESULTS` schließt ZDFs *ungefilterte* Top-Treffer aus, nicht unsere kindergefilterten. Ohne Nachbehandlung stünden Treffer doppelt im Overlay, deshalb wird "Alle Ergebnisse" gegen die Hrefs der Top-Ergebnisse gefiltert.
 - **Ohne Eingabe**: das Overlay zeigt die jeweils andere Kinderwelt — auf `/kinder` die ZDFchen-Sendungen, auf `/zdfchen` das große ZDFtivi-Angebot (siehe [Startansicht](#startansicht-ohne-eingabe)). Die Standardbänder von `/suche` fallen hier aus: Meistgefunden/Entdecken kommen aus ZDFs Empfehlungs-Query, die keinen Kinderfilter kennt, und Kategorie-Kacheln als Ersatz gibt es nicht — außer `/kinder` und `/kinder/sendungen-a-z` liefern die geprüften Kinder-Rubriken 404.
 
@@ -86,8 +87,8 @@ Gefiltert wird clientseitig. Damit trotzdem ein volles Grid zusammenkommt, holt 
 
 - Der Filter ist so gut wie ZDFs Metadatum: was nicht `isChildrenContent: true` gesetzt hat, taucht nicht auf.
 - Bei sehr breiten Suchwörtern können die 200 geholten Treffer knapp werden — es gibt keine Nachladeschleife über den Cursor.
-- Kein manueller Umschalter: außerhalb von `/kinder` sucht das Overlay unverändert global.
-- Der Modus hängt am Pfad: klickt man ein Ergebnis an, landet man unter `/video/…` oder `/animation/…` und die nächste Suche ist wieder global.
+- Kein manueller Umschalter: auf Seiten ohne Kinderinhalt sucht das Overlay unverändert global.
+- Seiten ohne Sendungs-Canonical im Pfad (z. B. Rubriken) zählen nicht als Kinderbereich.
 
 ## ZDFchen-Suche (zdf.de/zdfchen)
 
@@ -140,11 +141,31 @@ dist/       Build-Ausgabe — nicht eingecheckt, per npm run build erzeugen
 
 ## Changelog
 
+Versionen grob aus der Git-Historie zugeordnet.
+
+### 0.1.9
+
+- Bänder: Reco-Bänder werden über ZDFs Apollo-Client getauscht statt per DOM-Klon — echte React-Kacheln, Hover-Zoom und Weiter/Zurück funktionieren, korrekte Links (`/magazine/…#focus=…`)
+- Bänder: Kacheln fanden nach ZDF-Deploy keinen Container mehr (`no container found`) — Selektoren hängen jetzt an Struktur und stabilen Attributen (`data-testid`, `origin="teasertile"`, `img-shown`) statt an CSS-Hash-Klassen
+- Bänder: alle Kacheln zeigten das Bild der Vorlage-Kachel (ZDF setzt `srcset` jetzt auch am `<img>`)
+- Bänder: Sender kommt aus `contentOwner` statt fest "ZDF" (ARD-Inhalte); Sendungslogo der Vorlage (z. B. "Hacks") klebt nicht mehr auf fremden Videos
+- Bänder: SageMaker-Score-Badge auf den Kacheln ausgeblendet
+- Quick Search erkennt den Kinder-/ZDFchen-Bereich am Dokument statt am Pfad — Kindersendungen unter `/video/animation/…` (z. B. Bibi & Tina) suchen nicht mehr im Erwachsenenbereich
+- ID-Auflösung hinzugefügt (`zdf.de/<Video-ID>` → Canonical-URL, Optionen → Werkzeuge)
+
+### 0.1.7
+
 - Quick Search zeigt in den Kinderbereichen ohne Eingabe die jeweils andere Kinderwelt als Kachelreihe (`/kinder` → ZDFchen, `/zdfchen` → ZDFtivi)
 - Quick Search sucht auf `zdf.de/zdfchen` nur noch im Vorschulkatalog (Katalog aus der `/zdfchen`-Seite, Filter über die Collection-Canonicals — siehe [ZDFchen-Suche](#zdfchen-suche-zdfdezdfchen))
 - Quick Search sucht auf `zdf.de/kinder` nur noch in Kinderinhalten (eigene GraphQL-Query mit `structuralMetadata.isChildrenContent`, clientseitiger Filter — siehe [Kinder-Suche](#kinder-suche-zdfdekinder))
+
+### 0.1.4 – 0.1.6
+
 - Quick Search hinzugefügt (Overlay statt `/suche`, Ctrl+Space)
 - Tracking Enhancer hinzugefügt (misst per IntersectionObserver, welche Teaser wirklich sichtbar waren, und schickt `defeatedAssetIds` als sendBeacon an tracksrv.zdf.de — Popup-Toggle, Default aus)
+
+### 0.1.3
+
 - DKDI-Band-Overwrite hinzugefügt ("Das könnte Dich interessieren")
 - Next-Video-Overwrite hinzugefügt
 - A/B-Gruppen-Setter hinzugefügt

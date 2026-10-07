@@ -401,6 +401,16 @@ export async function setTrackingEnhancer(patch) {
   await chrome.storage.local.set({ trackingEnhancer });
 }
 
+// ID-Auflösung (main.js): zdf.de/<uuid> -> Canonical-URL. Eigener Storage-Key
+// ohne Speichern-Button wie Tracking Enhancer. Default an — liest nur die API.
+export const DEFAULT_ID_RESOLVER = { enabled: true };
+export let idResolver = { ...DEFAULT_ID_RESOLVER };
+
+export async function setIdResolver(patch) {
+  idResolver = { ...idResolver, ...patch };
+  await chrome.storage.local.set({ idResolver });
+}
+
 const uid = () => crypto.randomUUID();
 
 export const AB_GROUPS_SOURCE_URL = "https://abgroup.zdf.de/test.json";
@@ -419,7 +429,7 @@ export async function fetchAbGroups() {
 export async function loadState() {
   const stored = await chrome.storage.local.get([
     "sagemakerEndpoints", "historyPresets", "configs", "jsonTemplates", "pageTypes",
-    "abGroups", "abGroupMeta", "abGroupSettings", "quickSearch", "trackingEnhancer",
+    "abGroups", "abGroupMeta", "abGroupSettings", "quickSearch", "trackingEnhancer", "idResolver",
     "endpoints", "combos", // Zwischenschema (Vorgänger-Iteration)
     "bandConfigs", "nextVideoConfig" // ursprüngliches flaches Schema
   ]);
@@ -428,6 +438,7 @@ export async function loadState() {
   abGroupMeta = stored.abGroupMeta || { name: "", expirationDate: "" };
   quickSearch = { ...DEFAULT_QUICK_SEARCH, ...(stored.quickSearch || {}) };
   trackingEnhancer = { ...DEFAULT_TRACKING_ENHANCER, ...(stored.trackingEnhancer || {}) };
+  idResolver = { ...DEFAULT_ID_RESOLVER, ...(stored.idResolver || {}) };
   abGroupSettings = { ...DEFAULT_AB_GROUP_SETTINGS, ...(stored.abGroupSettings || {}) };
 
   // Nur bei komplett fehlendem Key vorbelegen — ein leeres Array bedeutet,

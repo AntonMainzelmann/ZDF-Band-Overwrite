@@ -136,7 +136,7 @@
       href: v.canonical ? `/${v.canonical}` : `/id/${id}`,
       image: layouts?.dim1200X480 || layouts?.original || FALLBACK_IMAGE,
       logo: logoLayouts?.dim760X340 || logoLayouts?.dim380X170 || null,
-      channel: "ZDF",
+      channel: v.contentOwner?.title || "ZDF",
       badges: ["UT"],
       subtitle: v.subtitle || v.contentOwner?.title || "",
       score
@@ -411,6 +411,34 @@
     }
     return areaTeasersCache[path];
   }
+  // Kinder-/ZDFchen-Bereich eines Dokuments: Sendungen wie Bibi & Tina liegen unter
+  // /animation/… bzw. /video/animation/…, der Pfad allein sagt also nichts. Die Sendung
+  // (Collection-Canonical) aus dem Pfad ziehen, isChildrenContent per API prüfen und
+  // erst dann gegen den ZDFchen-Katalog — so lädt eine Erwachsenen-Seite /zdfchen nie.
+  // -> "zdfchen" | "kinder" | null, gecacht pro Sendung.
+  const areaByCollection = {};
+  function getAreaForPath(pathname) {
+    if (pathname.startsWith("/zdfchen")) return Promise.resolve("zdfchen");
+    if (pathname.startsWith("/kinder")) return Promise.resolve("kinder");
+    const seg = pathname.split("/").filter(Boolean);
+    const collection = seg[0] === "video" ? seg[2] : seg[1]; // /video/<typ>/<sendung>/<folge> | /<typ>/<sendung>
+    if (!collection) return Promise.resolve(null);
+    return areaByCollection[collection] ??= (async () => {
+      const token = getCachedToken();
+      if (!token) return null;
+      const data = await fetchGraphQL(
+        "query AreaOf($c: String!) { smartCollectionByCanonical(canonical: $c) { structuralMetadata { isChildrenContent } } }",
+        { c: collection }, token
+      );
+      if (!data?.smartCollectionByCanonical?.structuralMetadata?.isChildrenContent) return null;
+      return (await getZdfchenCatalog()).has(collection) ? "zdfchen" : "kinder";
+    })().catch(e => {
+      log("Bereichs-Erkennung fehlgeschlagen:", collection, e.message);
+      delete areaByCollection[collection];
+      return null;
+    });
+  }
+
   // catalog: null = alle Kinderinhalte, Set von Collection-Canonicals = nur diese Sendungen
   // (Videos zählen über ihre smartCollection dazu).
   async function searchKidsVideos(query, topFirst, allFirst, catalog = null) {
@@ -505,7 +533,21 @@
   }
 
   // Exportiere das API-Modul auf das globale window-Objekt für main.js
+  // Löst eine Video-UUID zur vollen Canonical-URL auf (sharingUrl), z.B.
+  // f0c29269-… -> https://www.zdf.de/video/serien/hacks-104/ueberschreitungen-immer-100
+  async function resolveIdToUrl(id) {
+    const token = getCachedToken();
+    if (!token) return null;
+    const data = await fetchGraphQL(
+      "query ResolveId($ids: [String!]!) { videosByIds(ids: $ids) { sharingUrl } }",
+      { ids: [id] }, token
+    );
+    return data?.videosByIds?.[0]?.sharingUrl || null;
+  }
+
   window.zdfApi = {
+    resolveIdToUrl,
+    getAreaForPath,
     fetchDebugItems,
     fetchNextVideoOverride,
     searchVideos,

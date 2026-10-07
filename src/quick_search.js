@@ -238,15 +238,25 @@
     });
   }
 
-  // Auf zdf.de/kinder sucht das Overlay nur in Kinderinhalten, auf zdf.de/zdfchen nur in
-  // Sendungen des ZDFchen-Vorschulbereichs (siehe searchKidsVideos in zdf_api.js). Pfad erst
-  // beim Suchen lesen, nicht beim Laden: ZDF navigiert als SPA, man kann also ohne Reload in
-  // den Kinderbereich wechseln.
-  const isKidsArea = () => location.pathname.startsWith("/kinder");
-  const isZdfchenArea = () => location.pathname.startsWith("/zdfchen");
+  // Im Kinderbereich sucht das Overlay nur in Kinderinhalten, im ZDFchen-Bereich nur in
+  // Sendungen des Vorschulbereichs (siehe searchKidsVideos in zdf_api.js). Bereich hängt am
+  // Dokument, nicht am Pfad: Bibi & Tina liegt unter /animation/… (siehe getAreaForPath).
+  // Pfad erst beim Suchen lesen, nicht beim Laden: ZDF navigiert als SPA.
+  let area = null; // "kinder" | "zdfchen" | null, für location.pathname beim letzten runSearch
+  const isKidsArea = () => area === "kinder";
+  const isZdfchenArea = () => area === "zdfchen";
+
+  // Bereich schon vor dem Öffnen auflösen (Seitenload + SPA-Navigation), damit das Overlay
+  // nicht auf die API warten muss. Firefox kennt window.navigation nicht -> dort beim Öffnen.
+  const prefetchArea = () => window.zdfApi?.getAreaForPath(location.pathname).then(a => { area = a; });
+  prefetchArea();
+  window.navigation?.addEventListener("navigatesuccess", prefetchArea);
 
   async function runSearch(query) {
     const seq = ++requestSeq;
+    area = await window.zdfApi.getAreaForPath(location.pathname);
+    if (seq !== requestSeq) return;
+    if (input) input.placeholder = isZdfchenArea() ? "ZDFchen durchsuchen…" : isKidsArea() ? "ZDF/Kinder durchsuchen…" : "ZDF durchsuchen…";
     let newSections;
     if (query.trim()) {
       // [{label:"Top-Ergebnisse"|"Alle Ergebnisse", items}]

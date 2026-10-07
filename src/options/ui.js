@@ -12,6 +12,7 @@ export function renderAll() {
   renderAbGroup();
   renderQuickSearch();
   renderTrackingEnhancer();
+  renderIdResolver();
 }
 
 // ---------- Start: Band-Konfigurationen ----------
@@ -441,6 +442,29 @@ function renderTrackingEnhancer() {
   el.querySelector("#teEnabled").addEventListener("change", async (e) => {
     await state.setTrackingEnhancer({ enabled: e.target.checked });
     renderTrackingEnhancer();
+  });
+}
+
+// ---------- ID-Auflösung ----------
+
+function renderIdResolver() {
+  const el = document.getElementById("idResolverCard");
+  if (!el) return;
+
+  el.innerHTML = `
+    <label class="switch">
+      <input type="checkbox" id="idrEnabled" ${state.idResolver.enabled ? "checked" : ""}>
+      <span class="track"></span>
+      Video-IDs auflösen
+    </label>
+    <p class="hint">ID in die Adressleiste einfügen, z.B. <code>zdf.de/f0c29269-8965-467f-a876-c57076eefce4</code>
+      — die Seite fragt <code>videosByIds</code> nach der <code>sharingUrl</code> und leitet dorthin weiter
+      (<code>/video/serien/hacks-104/ueberschreitungen-immer-100</code>). Nur Videos, keine Collections.</p>
+  `;
+
+  el.querySelector("#idrEnabled").addEventListener("change", async (e) => {
+    await state.setIdResolver({ enabled: e.target.checked });
+    renderIdResolver();
   });
 }
 
